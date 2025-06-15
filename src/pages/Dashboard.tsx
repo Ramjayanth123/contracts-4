@@ -6,7 +6,6 @@ import ContractTrendsChart from '@/components/charts/ContractTrendsChart';
 import ESignatureStorage from '@/components/signature/ESignatureStorage';
 import { useAccessControl } from '@/components/access/RoleBasedAccess';
 import { useContracts } from '@/hooks/useContracts';
-import EnvTest from '@/components/EnvTest';
 
 import { FileText, Clock, CheckCircle, DollarSign } from 'lucide-react';
 
@@ -65,9 +64,6 @@ const Dashboard = () => {
           </p>
         </div>
       </div>
-
-      {/* Environment Test (for development) */}
-      <EnvTest />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

@@ -104,6 +104,18 @@ const VersionHistory = ({ contractId }: VersionHistoryProps) => {
         v2: version.version_number
       });
       setShowCompare(true);
+      
+      // Show a toast to indicate the comparison is starting
+      toast({
+        title: "Starting Comparison",
+        description: `Comparing version ${previousVersion.version_number} with version ${version.version_number}`,
+      });
+    } else {
+      toast({
+        title: "Cannot Compare",
+        description: "No previous version found to compare with.",
+        variant: "destructive"
+      });
     }
   };
 

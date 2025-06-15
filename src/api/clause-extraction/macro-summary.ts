@@ -1,128 +1,146 @@
-import openai from './openai-client';
+import { getOpenAIClient } from './openai-client';
 
-interface MacroSummary {
-  executive_summary: string;
-  key_findings: {
-    category: 'Commercial' | 'Legal' | 'Compliance' | 'Operational';
-    highlights: string;
-  }[];
-  clauses: {
-    clause_type: string;
-    department: 'Commercial' | 'Legal' | 'Compliance' | 'Operational';
-    summary: string;
-    importance: 'High' | 'Medium' | 'Low';
-  }[];
-  potential_issues: string[];
+interface ClauseAnalysis {
+  found: boolean;
+  clause_type?: string;
+  summary?: string;
+  importance?: 'High' | 'Medium' | 'Low';
+  rationale?: string;
 }
 
-export async function generateMacroSummary(analyses: any[]): Promise<MacroSummary> {
+interface ChunkAnalysis {
+  chunk_id: number;
+  commercial?: ClauseAnalysis;
+  legal?: ClauseAnalysis;
+  compliance?: ClauseAnalysis;
+  operational?: ClauseAnalysis;
+}
+
+interface MacroSummary {
+  key_points: string[];
+  recommendations: string[];
+  risk_assessment: string;
+}
+
+async function generateMacroSummary(analyses: ChunkAnalysis[], originalText: string): Promise<MacroSummary> {
   try {
-    console.log('Starting macro summary generation...');
+    console.log('Generating macro summary from analyses');
     
-    // Filter out chunks with no findings
-    const relevantAnalyses = analyses.filter(analysis => {
-      return (
-        (analysis.commercial && analysis.commercial.found) ||
-        (analysis.legal && analysis.legal.found) ||
-        (analysis.compliance && analysis.compliance.found) ||
-        (analysis.operational && analysis.operational.found)
-      );
-    });
+    // Get the OpenAI client
+    const openai = getOpenAIClient();
     
-    console.log(`Found ${relevantAnalyses.length} relevant analyses out of ${analyses.length} total`);
+    // Extract relevant clauses from all analyses
+    const relevantClauses = {
+      commercial: analyses
+        .filter(a => a.commercial?.found)
+        .map(a => ({
+          chunk_id: a.chunk_id,
+          clause_type: a.commercial?.clause_type,
+          summary: a.commercial?.summary,
+          importance: a.commercial?.importance
+        })),
+      legal: analyses
+        .filter(a => a.legal?.found)
+        .map(a => ({
+          chunk_id: a.chunk_id,
+          clause_type: a.legal?.clause_type,
+          summary: a.legal?.summary,
+          importance: a.legal?.importance
+        })),
+      compliance: analyses
+        .filter(a => a.compliance?.found)
+        .map(a => ({
+          chunk_id: a.chunk_id,
+          clause_type: a.compliance?.clause_type,
+          summary: a.compliance?.summary,
+          importance: a.compliance?.importance
+        })),
+      operational: analyses
+        .filter(a => a.operational?.found)
+        .map(a => ({
+          chunk_id: a.chunk_id,
+          clause_type: a.operational?.clause_type,
+          summary: a.operational?.summary,
+          importance: a.operational?.importance
+        })),
+    };
+    
+    // Count clauses by type
+    const commercialCount = relevantClauses.commercial.length;
+    const legalCount = relevantClauses.legal.length;
+    const complianceCount = relevantClauses.compliance.length;
+    const operationalCount = relevantClauses.operational.length;
+    
+    console.log(`Found ${commercialCount} commercial, ${legalCount} legal, ${complianceCount} compliance, and ${operationalCount} operational clauses`);
+    
+    // Create a system prompt for the macro summary
+    const systemPrompt = `
+You are a contract analysis expert. Your task is to create a comprehensive macro summary of a contract based on the extracted clauses.
 
-    // Extract all found clauses
-    const allClauses = [];
-    
-    for (const analysis of relevantAnalyses) {
-      if (analysis.commercial && analysis.commercial.found) {
-        allClauses.push({
-          ...analysis.commercial,
-          department: 'Commercial'
-        });
-      }
-      
-      if (analysis.legal && analysis.legal.found) {
-        allClauses.push({
-          ...analysis.legal,
-          department: 'Legal'
-        });
-      }
-      
-      if (analysis.compliance && analysis.compliance.found) {
-        allClauses.push({
-          ...analysis.compliance,
-          department: 'Compliance'
-        });
-      }
-      
-      if (analysis.operational && analysis.operational.found) {
-        allClauses.push({
-          ...analysis.operational,
-          department: 'Operational'
-        });
-      }
-    }
-    
-    console.log(`Extracted ${allClauses.length} total clauses`);
+The input will contain:
+1. A list of extracted clauses from the contract, organized by category (commercial, legal, compliance, operational)
+2. Each clause has a type, summary, and importance level
 
-    const prompt = `
-You are a contract analysis expert. Synthesize the findings from multiple specialized agents to provide a comprehensive overview of a contract's key clauses.
+Please provide a macro summary with the following sections:
+1. KEY POINTS: A bulleted list of 5-7 key points from the contract
+2. RECOMMENDATIONS: A bulleted list of 3-5 specific recommendations based on the contract analysis
+3. RISK ASSESSMENT: A brief paragraph assessing the overall risk level of the contract
 
-INSTRUCTIONS:
-Review the extracted clauses from commercial, legal, compliance, and operational analyses. Create a consolidated summary that:
-1. Highlights the most important clauses (especially those marked "High" importance)
-2. Removes any duplicates
-3. Groups related clauses
-4. Identifies any potential gaps or unusual aspects
+Focus on the most important clauses (marked as "High" importance) and identify any potential issues, gaps, or areas of concern.
 
 OUTPUT FORMAT:
 Please return your response as a JSON object with the following structure:
 {
-  "executive_summary": "3-5 sentence overview of the contract's most significant aspects",
-  "key_findings": [
-    {
-      "category": "Commercial"/"Legal"/"Compliance"/"Operational",
-      "highlights": "1-2 sentences on the most important aspects in this category"
-    }
-  ],
-  "clauses": [
-    {
-      "clause_type": "Termination",
-      "department": "Legal",
-      "summary": "Clear summary of the clause",
-      "importance": "High"/"Medium"/"Low"
-    }
-  ],
-  "potential_issues": ["Any concerning terms or missing elements"]
+  "key_points": ["point 1", "point 2", ...],
+  "recommendations": ["recommendation 1", "recommendation 2", ...],
+  "risk_assessment": "risk assessment text"
 }
 `;
+    
+    // Create a user prompt with the relevant clauses
+    const userPrompt = `
+Please analyze the following contract clauses and generate a macro summary:
 
-    console.log('Calling OpenAI API for macro summary...');
+COMMERCIAL CLAUSES (${commercialCount}):
+${relevantClauses.commercial.map(c => `- ${c.clause_type} (${c.importance}): ${c.summary}`).join('\n')}
+
+LEGAL CLAUSES (${legalCount}):
+${relevantClauses.legal.map(c => `- ${c.clause_type} (${c.importance}): ${c.summary}`).join('\n')}
+
+COMPLIANCE CLAUSES (${complianceCount}):
+${relevantClauses.compliance.map(c => `- ${c.clause_type} (${c.importance}): ${c.summary}`).join('\n')}
+
+OPERATIONAL CLAUSES (${operationalCount}):
+${relevantClauses.operational.map(c => `- ${c.clause_type} (${c.importance}): ${c.summary}`).join('\n')}
+
+Please provide a macro summary with KEY POINTS, RECOMMENDATIONS, and RISK ASSESSMENT sections.
+`;
     
-    // Explicitly tell the model to return JSON
-    const userContent = 'Please analyze these clauses and return a JSON summary according to the format specified:\n\n' + 
-                        JSON.stringify(allClauses);
-    
+    // Call the OpenAI API
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
-        { role: "system", content: prompt },
-        { role: "user", content: userContent }
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
       ],
       response_format: { type: "json_object" }
     });
 
-    console.log('OpenAI API response received');
-    
+    // Parse the response
     try {
       const result = JSON.parse(response.choices[0].message.content);
-      console.log('Successfully parsed JSON response');
+      console.log('Macro summary generated successfully');
       return result;
     } catch (parseError) {
-      console.error('Failed to parse OpenAI response as JSON:', parseError);
+      console.error('Failed to parse macro summary response as JSON:', parseError);
       console.log('Raw response:', response.choices[0].message.content);
-      throw new Error('Failed to parse OpenAI response as JSON');
+      
+      // Return a fallback summary
+      return {
+        key_points: ['Error generating key points'],
+        recommendations: ['Error generating recommendations'],
+        risk_assessment: 'Error generating risk assessment'
+      };
     }
   } catch (error) {
     console.error('Error generating macro summary:', error);
@@ -141,7 +159,7 @@ export default async function handler(req: Request) {
 
   try {
     console.log('Macro summary API called');
-    const { analyses } = await req.json();
+    const { analyses, text } = await req.json();
     
     if (!analyses || !Array.isArray(analyses)) {
       console.error('Invalid request: analyses array is required');
@@ -151,8 +169,16 @@ export default async function handler(req: Request) {
       });
     }
 
-    console.log(`Processing ${analyses.length} analyses`);
-    const result = await generateMacroSummary(analyses);
+    if (!text || typeof text !== 'string') {
+      console.error('Invalid request: original text is required');
+      return new Response(JSON.stringify({ error: 'Original text is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    console.log(`Generating macro summary from ${analyses.length} analyses`);
+    const result = await generateMacroSummary(analyses, text);
     
     return new Response(JSON.stringify(result), {
       status: 200,

@@ -2,7 +2,16 @@ import { useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 
 // Define the types for our clause extraction
-export interface ClauseChunk {
+export interface DocumentStructure {
+  title: string;
+  sections: Array<{
+    heading: string;
+    level: number;
+    text: string;
+  }>;
+}
+
+export interface ChunkResult {
   chunk_id: number;
   heading: string;
   text: string;
@@ -15,135 +24,124 @@ export interface ClauseAnalysis {
   summary?: string;
   importance?: 'High' | 'Medium' | 'Low';
   rationale?: string;
-  extracted_text?: string;
-  department?: 'Commercial' | 'Legal' | 'Compliance' | 'Operational';
+}
+
+export interface ChunkAnalysis {
+  chunk_id: number;
+  commercial?: ClauseAnalysis;
+  legal?: ClauseAnalysis;
+  compliance?: ClauseAnalysis;
+  operational?: ClauseAnalysis;
 }
 
 export interface MacroSummary {
-  executive_summary: string;
-  key_findings: {
-    category: 'Commercial' | 'Legal' | 'Compliance' | 'Operational';
-    highlights: string;
-  }[];
-  clauses: {
-    clause_type: string;
-    department: 'Commercial' | 'Legal' | 'Compliance' | 'Operational';
-    summary: string;
-    importance: 'High' | 'Medium' | 'Low';
-  }[];
-  potential_issues: string[];
+  key_points: string[];
+  recommendations: string[];
+  risk_assessment: string;
 }
 
-export interface ClauseExtractionResult {
-  chunks: ClauseChunk[];
-  analyses: {
-    chunk_id: number;
-    commercial?: ClauseAnalysis;
-    legal?: ClauseAnalysis;
-    compliance?: ClauseAnalysis;
-    operational?: ClauseAnalysis;
-  }[];
-  macroSummary: MacroSummary;
+export interface ExtractionResult {
+  structure?: DocumentStructure;
+  chunks?: ChunkResult[];
+  analyses?: ChunkAnalysis[];
+  macro_summary?: MacroSummary;
 }
 
 interface ClauseExtractionOptions {
-  onComplete?: (result: any) => void;
+  onComplete?: (result: ExtractionResult) => void;
   onError?: (error: Error) => void;
 }
 
 export default function useClauseExtraction(options: ClauseExtractionOptions = {}) {
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<ExtractionResult>({});
+  const [progress, setProgress] = useState<string>('');
+  const [stage, setStage] = useState<string>('');
   const { toast } = useToast();
 
   const extractClauses = async (text: string) => {
     try {
-      // Validate that text is not null or empty
-      if (!text || text.trim() === '') {
-        throw new Error('Text is required');
-      }
-      
-      console.log('Starting clause extraction process...');
       setIsLoading(true);
       setError(null);
-      
-      // Step 1: Validate document structure
-      console.log('Step 1: Validating document structure');
-      const structureResponse = await fetch('/api/clause-extraction/validate-structure', {
+      setResult({});
+      setProgress('Starting document analysis...');
+      setStage('structure');
+
+      // Step 1: Extract document structure
+      const structureResponse = await fetch('/api/clause-extraction/extract-structure', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
+        body: JSON.stringify({ text }),
       });
-      
+
       if (!structureResponse.ok) {
-        const errorData = await structureResponse.json();
-        throw new Error(errorData.error || 'Failed to validate document structure');
+        throw new Error(`Failed to extract document structure: ${structureResponse.statusText}`);
       }
-      
-      const structureResult = await structureResponse.json();
-      console.log('Document structure validation result:', structureResult);
-      
+
+      const structure = await structureResponse.json();
+      setResult(prev => ({ ...prev, structure }));
+      setProgress('Document structure extracted. Chunking document...');
+      setStage('chunking');
+
       // Step 2: Chunk the document
-      console.log('Step 2: Chunking document');
       const chunkResponse = await fetch('/api/clause-extraction/chunk-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          text,
-          isStructured: structureResult.is_structured
-        })
+        body: JSON.stringify({ structure }),
       });
-      
+
       if (!chunkResponse.ok) {
-        const errorData = await chunkResponse.json();
-        throw new Error(errorData.error || 'Failed to chunk document');
+        throw new Error(`Failed to chunk document: ${chunkResponse.statusText}`);
       }
-      
+
       const chunks = await chunkResponse.json();
-      console.log(`Document chunked into ${chunks.length} sections`);
-      
+      setResult(prev => ({ ...prev, chunks }));
+      setProgress(`Document chunked into ${chunks.length} sections. Analyzing chunks...`);
+      setStage('analysis');
+
       // Step 3: Analyze chunks
-      console.log('Step 3: Analyzing chunks');
       const analysisResponse = await fetch('/api/clause-extraction/analyze-chunks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chunks })
+        body: JSON.stringify({ chunks }),
       });
-      
+
       if (!analysisResponse.ok) {
-        const errorData = await analysisResponse.json();
-        throw new Error(errorData.error || 'Failed to analyze document chunks');
+        throw new Error(`Failed to analyze chunks: ${analysisResponse.statusText}`);
       }
-      
+
       const analyses = await analysisResponse.json();
-      console.log(`Completed analysis of ${analyses.length} chunks`);
-      
+      setResult(prev => ({ ...prev, analyses }));
+      setProgress('Chunk analysis complete. Generating macro summary...');
+      setStage('summary');
+
       // Step 4: Generate macro summary
-      console.log('Step 4: Generating macro summary');
       const summaryResponse = await fetch('/api/clause-extraction/macro-summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ analyses })
+        body: JSON.stringify({ 
+          analyses,
+          text // Send the original text to ensure the API has all necessary context
+        }),
       });
-      
+
       if (!summaryResponse.ok) {
-        const errorData = await summaryResponse.json();
-        throw new Error(errorData.error || 'Failed to generate macro summary');
+        throw new Error(`Failed to generate macro summary: ${summaryResponse.statusText}`);
       }
-      
-      const summary = await summaryResponse.json();
-      console.log('Macro summary generated successfully');
-      
+
+      const macro_summary = await summaryResponse.json();
+      setResult(prev => ({ ...prev, macro_summary }));
+      setProgress('Analysis complete!');
+      setStage('complete');
+
       // Compile final result
       const finalResult = {
-        structure: structureResult,
+        structure,
         chunks,
         analyses,
-        summary
+        macro_summary
       };
-      
-      setResult(finalResult);
       
       // Call onComplete callback if provided
       if (options.onComplete) {
@@ -153,13 +151,14 @@ export default function useClauseExtraction(options: ClauseExtractionOptions = {
       console.log('Clause extraction process completed successfully');
       return finalResult;
     } catch (err) {
-      console.error('Error in clause extraction process:', err);
-      const error = err instanceof Error ? err : new Error('Unknown error occurred');
-      setError(error);
+      console.error('Clause extraction error:', err);
+      setError(err instanceof Error ? err.message : 'Unknown error during clause extraction');
+      setProgress('Error during analysis');
+      setStage('error');
       
       // Call onError callback if provided
       if (options.onError) {
-        options.onError(error);
+        options.onError(err instanceof Error ? err : new Error('Unknown error occurred'));
       }
       
       toast({
@@ -168,7 +167,7 @@ export default function useClauseExtraction(options: ClauseExtractionOptions = {
         variant: "destructive",
       });
       
-      throw error;
+      throw err instanceof Error ? err : new Error('Unknown error occurred');
     } finally {
       setIsLoading(false);
     }
@@ -178,6 +177,8 @@ export default function useClauseExtraction(options: ClauseExtractionOptions = {
     extractClauses,
     isLoading,
     error,
-    result
+    result,
+    progress,
+    stage,
   };
 } 

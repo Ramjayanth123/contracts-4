@@ -1,4 +1,4 @@
-import openai from './openai-client';
+import { getOpenAIClient } from './openai-client';
 
 interface ChunkResult {
   chunk_id: number;
@@ -13,7 +13,6 @@ interface ClauseAnalysis {
   summary?: string;
   importance?: 'High' | 'Medium' | 'Low';
   rationale?: string;
-  extracted_text?: string;
 }
 
 interface ChunkAnalysis {
@@ -24,73 +23,114 @@ interface ChunkAnalysis {
   operational?: ClauseAnalysis;
 }
 
-// Define specialized agent prompts
-const agentPrompts = {
-  commercial: `
-You are a commercial terms specialist analyzing contract text. Extract and summarize clauses related to financial and commercial aspects.
+// Screening prompt for initial relevance check
+const screeningPrompt = `
+You are a contract screening assistant. Your task is to quickly identify if this text contains clauses related to:
+1. Commercial aspects (payment, pricing, exclusivity, renewal, termination)
+2. Legal aspects (liability, indemnification, warranties, IP, confidentiality)
+3. Compliance aspects (data protection, regulations, audit rights)
+4. Operational aspects (implementation, support, training, timelines)
 
-FOCUS AREAS:
-- Payment terms and conditions
-- Pricing structures and models
-- Invoicing requirements
-- Delivery schedules
-- Service level agreements
-- Performance metrics
-- Renewal terms
-- Volume commitments
-
-INSTRUCTIONS:
-Analyze the provided contract chunk and identify any commercial clauses.
-
-OUTPUT FORMAT:
-Please return a JSON object with the following structure:
+Return a JSON object with true/false values for each category:
 {
-  "found": true/false,
-  "clause_type": "Payment Terms"/"Pricing"/"Invoicing"/"Delivery"/"SLA"/"Other",
-  "summary": "2-3 sentence summary of the clause's key points",
-  "importance": "High"/"Medium"/"Low",
-  "rationale": "Why this clause matters commercially",
-  "extracted_text": "The exact text of the clause"
+  "commercial_relevant": true/false,
+  "legal_relevant": true/false,
+  "compliance_relevant": true/false,
+  "operational_relevant": true/false
 }
+`;
 
-If no relevant clause is found, return {"found": false}
-`,
-
-  legal: `
-You are a legal specialist analyzing contract text. Extract and summarize clauses related to legal rights, obligations, and risks.
+// Function to analyze a chunk with the tiered approach
+async function analyzeChunk(chunk: ChunkResult): Promise<ChunkAnalysis> {
+  try {
+    console.log(`Starting analysis of chunk ${chunk.chunk_id}: "${chunk.heading}"`);
+    
+    // Get the OpenAI client only when needed
+    const openai = getOpenAIClient();
+    
+    // STEP 1: Initial screening with GPT-3.5 Turbo
+    console.log(`Performing initial screening of chunk ${chunk.chunk_id} with GPT-3.5 Turbo`);
+    const screeningResponse = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { role: "system", content: screeningPrompt },
+        { role: "user", content: chunk.text }
+      ],
+      response_format: { type: "json_object" }
+    });
+    
+    // Parse the screening results
+    let relevanceCheck;
+    try {
+      relevanceCheck = JSON.parse(screeningResponse.choices[0].message.content);
+      console.log(`Screening results for chunk ${chunk.chunk_id}:`, relevanceCheck);
+    } catch (parseError) {
+      console.error(`Failed to parse screening response as JSON:`, parseError);
+      // Default to analyzing all aspects if parsing fails
+      relevanceCheck = {
+        commercial_relevant: true,
+        legal_relevant: true,
+        compliance_relevant: true,
+        operational_relevant: true
+      };
+    }
+    
+    // If no relevant clauses found in any category, return early
+    if (!relevanceCheck.commercial_relevant && 
+        !relevanceCheck.legal_relevant && 
+        !relevanceCheck.compliance_relevant && 
+        !relevanceCheck.operational_relevant) {
+      console.log(`No relevant clauses found in chunk ${chunk.chunk_id}, skipping detailed analysis`);
+      return {
+        chunk_id: chunk.chunk_id,
+        commercial: { found: false },
+        legal: { found: false },
+        compliance: { found: false },
+        operational: { found: false }
+      };
+    }
+    
+    // STEP 2: Detailed analysis with GPT-4, but only for relevant categories
+    // Modify the prompt to focus only on relevant categories
+    let detailedPrompt = `
+You are a comprehensive contract analysis specialist capable of analyzing contract text from multiple perspectives.
+Your task is to identify and extract key clauses related to the following aspects:
 
 FOCUS AREAS:
-- Indemnification
-- Limitation of liability
-- Warranties
+`;
+
+    // Only include relevant categories in the prompt
+    if (relevanceCheck.commercial_relevant) {
+      detailedPrompt += `
+COMMERCIAL:
+- Payment terms
+- Pricing structures
+- Exclusivity clauses
+- Volume commitments
+- Renewal conditions
 - Termination rights
+- Service levels
+- Performance metrics
+`;
+    }
+    
+    if (relevanceCheck.legal_relevant) {
+      detailedPrompt += `
+LEGAL:
+- Liability limitations
+- Indemnification
+- Warranties
 - Intellectual property
 - Confidentiality
 - Dispute resolution
 - Governing law
-- Assignment rights
-
-INSTRUCTIONS:
-Analyze the provided contract chunk and identify any legal clauses.
-
-OUTPUT FORMAT:
-Please return a JSON object with the following structure:
-{
-  "found": true/false,
-  "clause_type": "Indemnification"/"Liability"/"Termination"/"IP Rights"/"Confidentiality"/"Dispute Resolution"/"Other",
-  "summary": "2-3 sentence summary of the clause's key points",
-  "importance": "High"/"Medium"/"Low",
-  "rationale": "Why this clause matters from a legal risk perspective",
-  "extracted_text": "The exact text of the clause"
-}
-
-If no relevant clause is found, return {"found": false}
-`,
-
-  compliance: `
-You are a compliance specialist analyzing contract text. Extract and summarize clauses related to regulatory compliance and governance.
-
-FOCUS AREAS:
+- Force majeure
+`;
+    }
+    
+    if (relevanceCheck.compliance_relevant) {
+      detailedPrompt += `
+COMPLIANCE:
 - Data protection/GDPR
 - Industry-specific regulations
 - Audit rights
@@ -99,28 +139,12 @@ FOCUS AREAS:
 - Compliance representations
 - Anti-corruption/FCPA
 - Record keeping obligations
-
-INSTRUCTIONS:
-Analyze the provided contract chunk and identify any compliance-related clauses.
-
-OUTPUT FORMAT:
-Please return a JSON object with the following structure:
-{
-  "found": true/false,
-  "clause_type": "Data Protection"/"Audit Rights"/"Regulatory Compliance"/"Certifications"/"Anti-corruption"/"Other",
-  "summary": "2-3 sentence summary of the clause's key points",
-  "importance": "High"/"Medium"/"Low",
-  "rationale": "Why this clause matters from a compliance perspective",
-  "extracted_text": "The exact text of the clause"
-}
-
-If no relevant clause is found, return {"found": false}
-`,
-
-  operational: `
-You are an operations specialist analyzing contract text. Extract and summarize clauses related to operational execution and delivery.
-
-FOCUS AREAS:
+`;
+    }
+    
+    if (relevanceCheck.operational_relevant) {
+      detailedPrompt += `
+OPERATIONAL:
 - Implementation timelines
 - Support and maintenance
 - Training requirements
@@ -129,42 +153,77 @@ FOCUS AREAS:
 - Resource commitments
 - Reporting cadence
 - Operational constraints
-
+`;
+    }
+    
+    detailedPrompt += `
 INSTRUCTIONS:
-Analyze the provided contract chunk and identify any operations-related clauses.
+Analyze the provided contract chunk and identify clauses related to each category.
 
 OUTPUT FORMAT:
 Please return a JSON object with the following structure:
-{
-  "found": true/false,
-  "clause_type": "Implementation"/"Support"/"Training"/"Change Management"/"Reporting"/"Other",
-  "summary": "2-3 sentence summary of the clause's key points",
-  "importance": "High"/"Medium"/"Low",
-  "rationale": "Why this clause matters from an operational perspective",
-  "extracted_text": "The exact text of the clause"
+{`;
+
+    // Only include relevant categories in the output format
+    if (relevanceCheck.commercial_relevant) {
+      detailedPrompt += `
+  "commercial": {
+    "found": true/false,
+    "clause_type": "Payment"/"Pricing"/"Exclusivity"/etc.,
+    "summary": "2-3 sentence summary of the clause's key points",
+    "importance": "High"/"Medium"/"Low",
+    "rationale": "Why this clause matters from a commercial perspective"
+  },`;
+    }
+    
+    if (relevanceCheck.legal_relevant) {
+      detailedPrompt += `
+  "legal": {
+    "found": true/false,
+    "clause_type": "Liability"/"Indemnity"/"Warranty"/etc.,
+    "summary": "2-3 sentence summary of the clause's key points",
+    "importance": "High"/"Medium"/"Low",
+    "rationale": "Why this clause matters from a legal risk perspective"
+  },`;
+    }
+    
+    if (relevanceCheck.compliance_relevant) {
+      detailedPrompt += `
+  "compliance": {
+    "found": true/false,
+    "clause_type": "Data Protection"/"Audit Rights"/etc.,
+    "summary": "2-3 sentence summary of the clause's key points",
+    "importance": "High"/"Medium"/"Low",
+    "rationale": "Why this clause matters from a compliance perspective"
+  },`;
+    }
+    
+    if (relevanceCheck.operational_relevant) {
+      detailedPrompt += `
+  "operational": {
+    "found": true/false,
+    "clause_type": "Implementation"/"Support"/"Training"/etc.,
+    "summary": "2-3 sentence summary of the clause's key points",
+    "importance": "High"/"Medium"/"Low",
+    "rationale": "Why this clause matters from an operational perspective"
+  },`;
+    }
+    
+    // Remove the trailing comma and close the JSON
+    detailedPrompt = detailedPrompt.replace(/,$/,`
 }
 
-If no relevant clause is found, return {"found": false}
-`
-};
+If no relevant clause is found for a category, return {"found": false} for that category.
+`);
 
-// Function to analyze a chunk with a specific agent
-async function analyzeChunkWithAgent(
-  chunk: ChunkResult,
-  agentType: 'commercial' | 'legal' | 'compliance' | 'operational'
-): Promise<ClauseAnalysis> {
-  try {
-    console.log(`Analyzing chunk ${chunk.chunk_id} with ${agentType} agent...`);
-    
-    const prompt = agentPrompts[agentType];
-    
-    // Explicitly tell the model to return JSON
-    const userContent = `Please analyze this contract text for ${agentType} clauses and return a JSON response:\n\n${chunk.text}`;
+    console.log(`Performing detailed analysis of chunk ${chunk.chunk_id} with GPT-4 for relevant categories`);
+    // Second pass - detailed analysis with GPT-4, but only for relevant categories
+    const userContent = `Please analyze this contract text and return a JSON response with analyses for the requested aspects:\n\n${chunk.text}`;
     
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
-        { role: "system", content: prompt },
+        { role: "system", content: detailedPrompt },
         { role: "user", content: userContent }
       ],
       response_format: { type: "json_object" }
@@ -172,41 +231,31 @@ async function analyzeChunkWithAgent(
 
     try {
       const result = JSON.parse(response.choices[0].message.content);
-      console.log(`${agentType} analysis for chunk ${chunk.chunk_id}: ${result.found ? 'Found ' + result.clause_type : 'No clauses found'}`);
-      return result;
+      console.log(`Detailed analysis for chunk ${chunk.chunk_id} complete`);
+      
+      // Create the full response, setting non-relevant categories to { found: false }
+      const fullResult: ChunkAnalysis = {
+        chunk_id: chunk.chunk_id,
+        commercial: relevanceCheck.commercial_relevant ? result.commercial : { found: false },
+        legal: relevanceCheck.legal_relevant ? result.legal : { found: false },
+        compliance: relevanceCheck.compliance_relevant ? result.compliance : { found: false },
+        operational: relevanceCheck.operational_relevant ? result.operational : { found: false }
+      };
+      
+      // Log results for each category
+      if (fullResult.commercial?.found) console.log(`Commercial analysis: Found ${fullResult.commercial.clause_type}`);
+      if (fullResult.legal?.found) console.log(`Legal analysis: Found ${fullResult.legal.clause_type}`);
+      if (fullResult.compliance?.found) console.log(`Compliance analysis: Found ${fullResult.compliance.clause_type}`);
+      if (fullResult.operational?.found) console.log(`Operational analysis: Found ${fullResult.operational.clause_type}`);
+      
+      return fullResult;
     } catch (parseError) {
-      console.error(`Failed to parse ${agentType} agent response as JSON:`, parseError);
+      console.error(`Failed to parse analysis response as JSON:`, parseError);
       console.log('Raw response:', response.choices[0].message.content);
-      return { found: false };
+      return {
+        chunk_id: chunk.chunk_id
+      };
     }
-  } catch (error) {
-    console.error(`Error analyzing chunk with ${agentType} agent:`, error);
-    return { found: false };
-  }
-}
-
-// Function to analyze a chunk with all agents in parallel
-async function analyzeChunk(chunk: ChunkResult): Promise<ChunkAnalysis> {
-  try {
-    console.log(`Starting analysis of chunk ${chunk.chunk_id}: "${chunk.heading}"`);
-    
-    // Run all agents in parallel
-    const [commercial, legal, compliance, operational] = await Promise.all([
-      analyzeChunkWithAgent(chunk, 'commercial'),
-      analyzeChunkWithAgent(chunk, 'legal'),
-      analyzeChunkWithAgent(chunk, 'compliance'),
-      analyzeChunkWithAgent(chunk, 'operational')
-    ]);
-
-    console.log(`Completed analysis of chunk ${chunk.chunk_id}`);
-    
-    return {
-      chunk_id: chunk.chunk_id,
-      commercial,
-      legal,
-      compliance,
-      operational
-    };
   } catch (error) {
     console.error('Error analyzing chunk:', error);
     return {

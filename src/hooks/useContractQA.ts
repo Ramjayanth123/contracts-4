@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { getOpenAIClient } from '@/api/clause-extraction/openai-client';
 import { useToast } from '@/hooks/use-toast';
-import openai from '@/api/clause-extraction/openai-client';
 
 // Define types for messages and evidence
 interface Evidence {
@@ -29,223 +29,200 @@ interface ContractChunk {
   };
 }
 
+// System prompt for the QA assistant
 const SYSTEM_PROMPT = `
-You are ContractGPT, an expert legal assistant specialized in analyzing and answering questions about contracts. Your purpose is to help users understand specific contracts by providing accurate, evidence-based answers to their questions.
+You are a Contract QA Assistant, specialized in answering questions about legal contracts.
 
-CONTEXT:
-- You have been provided with relevant sections from a legal contract.
-- These sections were retrieved based on the user's question using semantic search.
-- You must ONLY use the provided contract sections to formulate your answer.
+GUIDELINES:
+1. Answer questions based ONLY on the contract sections provided
+2. If you can't find the answer in the provided sections, say so clearly
+3. Be precise and factual, citing specific clauses when possible
+4. Avoid making assumptions beyond what's stated in the contract
+5. For questions about legal interpretation, note that you're providing information, not legal advice
 
-INSTRUCTIONS:
-1. Answer ONLY questions related to the provided contract sections.
-2. If the answer cannot be found in the provided sections, state clearly: "I cannot find information about this in the provided contract sections."
-3. Do NOT make assumptions or inferences beyond what is explicitly stated in the contract.
-4. Do NOT reference legal knowledge outside the provided contract sections.
-5. Always cite the specific clause or section number when providing an answer.
-6. Format your answers in plain language that non-legal professionals can understand.
-7. When quoting the contract, use quotation marks and specify the exact section.
-8. For questions about dates, payment terms, or specific obligations, quote the exact language.
-
-ANSWER FORMAT:
-1. Start with a direct answer to the question.
-2. Provide supporting evidence from the contract, using direct quotes when appropriate.
-3. If relevant, explain the practical implications of the clause in simple terms.
-4. End with a citation of the specific section(s) or clause(s) referenced.
-
-Remember: Your goal is to help users understand what is IN THIS SPECIFIC CONTRACT, not to provide general legal advice or information not contained in the provided sections.
+FORMAT YOUR ANSWERS:
+- Start with a direct answer to the question
+- Include relevant quotes from the contract as evidence
+- If applicable, note the section/clause where the information was found
 `;
+
+// Constants for batching
+const MAX_BATCH_SIZE = 20; // Maximum number of texts to embed in a single API call
 
 export function useContractQA(contractId: string) {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isInitialized, setIsInitialized] = useState(false);
   const [contractChunks, setContractChunks] = useState<ContractChunk[]>([]);
-  const [embeddingCache, setEmbeddingCache] = useState<EmbeddingCache>({});
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const { toast } = useToast();
-
-  // Load from localStorage on mount
+  
+  // Load messages from localStorage on mount
   useEffect(() => {
-    try {
-      console.log('Loading QA data from localStorage...');
-      
-      // Load messages
+    if (contractId) {
       const savedMessages = localStorage.getItem(`qa_messages_${contractId}`);
       if (savedMessages) {
-        setMessages(JSON.parse(savedMessages));
-        console.log('Loaded saved messages from localStorage');
+        try {
+          setMessages(JSON.parse(savedMessages));
+        } catch (error) {
+          console.error('Error parsing saved messages:', error);
+        }
       }
-      
-      // Load chunks and embeddings
-      const savedChunks = localStorage.getItem(`qa_chunks_${contractId}`);
-      const savedEmbeddings = localStorage.getItem(`qa_embeddings_${contractId}`);
-      
-      if (savedChunks && savedEmbeddings) {
-        setContractChunks(JSON.parse(savedChunks));
-        setEmbeddingCache(JSON.parse(savedEmbeddings));
-        setIsInitialized(true);
-        console.log('Loaded saved chunks and embeddings from localStorage');
-      }
-    } catch (error) {
-      console.error('Error loading from localStorage:', error);
     }
   }, [contractId]);
-
+  
   // Save messages to localStorage when they change
   useEffect(() => {
-    if (messages.length > 0) {
+    if (contractId && messages.length > 0) {
       localStorage.setItem(`qa_messages_${contractId}`, JSON.stringify(messages));
     }
   }, [messages, contractId]);
-
-  // Function to initialize the QA system with contract text
-  const initialize = useCallback(async (documentText: string) => {
+  
+  // Initialize the QA system with contract text
+  const initialize = async (contractText: string) => {
     try {
-      console.log('Initializing Contract QA system...');
+      console.log('Initializing QA system with contract text...');
       setIsProcessing(true);
       
-      // Check if we already have chunks and embeddings
-      if (contractChunks.length > 0 && Object.keys(embeddingCache).length > 0) {
-        console.log('Using cached chunks and embeddings');
-        setIsInitialized(true);
-        setIsProcessing(false);
-        return;
-      }
+      // Chunk the document
+      const chunks = chunkDocument(contractText);
+      console.log(`Created ${chunks.length} chunks from contract text`);
       
-      // Step 1: Chunk the document
-      console.log('Chunking document...');
-      const chunks = chunkDocument(documentText);
-      console.log(`Created ${chunks.length} chunks`);
-      
-      // Step 2: Generate embeddings for each chunk
-      console.log('Generating embeddings...');
-      const newEmbeddingCache: EmbeddingCache = {};
-      
-      // Process chunks in batches to avoid rate limits
-      const batchSize = 5;
-      for (let i = 0; i < chunks.length; i += batchSize) {
-        const batch = chunks.slice(i, i + batchSize);
-        const batchTexts = batch.map(chunk => chunk.text);
-        
-        try {
-          const response = await openai.embeddings.create({
-            model: "text-embedding-3-small",
-            input: batchTexts,
-          });
-          
-          batch.forEach((chunk, index) => {
-            const embedding = response.data[index].embedding;
-            newEmbeddingCache[chunk.id] = embedding;
-            chunks[i + index].embedding = embedding;
-          });
-          
-          console.log(`Processed embeddings batch ${i/batchSize + 1}/${Math.ceil(chunks.length/batchSize)}`);
-        } catch (error) {
-          console.error('Error generating embeddings for batch:', error);
-          throw new Error('Failed to generate embeddings');
+      // Create contract chunks
+      const contractChunksWithoutEmbeddings = chunks.map(chunk => ({
+        id: `chunk-${chunk.id}`,
+        text: chunk.text,
+        metadata: {
+          section: chunk.heading
         }
-      }
+      }));
       
-      // Save to state and localStorage
-      setContractChunks(chunks);
-      setEmbeddingCache(newEmbeddingCache);
-      localStorage.setItem(`qa_chunks_${contractId}`, JSON.stringify(chunks));
-      localStorage.setItem(`qa_embeddings_${contractId}`, JSON.stringify(newEmbeddingCache));
+      // Pre-generate embeddings for all chunks in batches for efficiency
+      const chunksWithEmbeddings = await generateEmbeddingsForChunks(contractChunksWithoutEmbeddings);
       
-      console.log('Contract QA system initialized successfully');
+      setContractChunks(chunksWithEmbeddings);
       setIsInitialized(true);
+      console.log('QA system initialized successfully');
     } catch (error) {
-      console.error('Error initializing Contract QA system:', error);
+      console.error('Error initializing QA system:', error);
       toast({
-        title: "Initialization Failed",
-        description: "Could not initialize the QA system. Please try again.",
+        title: "Error",
+        description: "Failed to initialize QA system",
         variant: "destructive",
       });
     } finally {
       setIsProcessing(false);
     }
-  }, [contractId, contractChunks, embeddingCache, toast]);
-
-  // Function to chunk document text
-  const chunkDocument = (text: string): ContractChunk[] => {
-    if (!text) return [];
+  };
+  
+  // Pre-generate embeddings for all chunks in batches
+  const generateEmbeddingsForChunks = async (chunks: ContractChunk[]): Promise<ContractChunk[]> => {
+    console.log(`Generating embeddings for ${chunks.length} chunks in batches...`);
     
-    // Split by paragraphs first
-    const paragraphs = text.split(/\n\s*\n/);
+    // Process chunks in batches to avoid overwhelming the API
+    const chunksWithEmbeddings: ContractChunk[] = [...chunks];
     
-    // Create chunks with some overlap
-    const chunks: ContractChunk[] = [];
-    let chunkId = 0;
-    
-    paragraphs.forEach((paragraph) => {
-      // Skip empty paragraphs
-      if (paragraph.trim().length === 0) return;
+    // Process in batches of MAX_BATCH_SIZE
+    for (let i = 0; i < chunks.length; i += MAX_BATCH_SIZE) {
+      const batchChunks = chunks.slice(i, i + MAX_BATCH_SIZE);
+      const batchTexts = batchChunks.map(chunk => chunk.text);
       
-      // For longer paragraphs, split into smaller chunks
-      if (paragraph.length > 1000) {
-        // Split by sentences
-        const sentences = paragraph.match(/[^.!?]+[.!?]+/g) || [paragraph];
+      try {
+        console.log(`Processing batch ${Math.floor(i/MAX_BATCH_SIZE) + 1}/${Math.ceil(chunks.length/MAX_BATCH_SIZE)}`);
+        const batchEmbeddings = await generateEmbeddings(batchTexts);
         
-        let currentChunk = '';
-        for (const sentence of sentences) {
-          if ((currentChunk + sentence).length <= 1000) {
-            currentChunk += sentence;
-          } else {
-            if (currentChunk) {
-              chunks.push({
-                id: `chunk_${chunkId++}`,
-                text: currentChunk.trim()
-              });
-            }
-            currentChunk = sentence;
+        // Assign embeddings to chunks
+        for (let j = 0; j < batchChunks.length; j++) {
+          const chunkIndex = i + j;
+          if (chunkIndex < chunksWithEmbeddings.length) {
+            chunksWithEmbeddings[chunkIndex].embedding = batchEmbeddings[j];
           }
         }
-        
-        if (currentChunk) {
-          chunks.push({
-            id: `chunk_${chunkId++}`,
-            text: currentChunk.trim()
-          });
-        }
-      } else {
-        // Add paragraph as a single chunk
+      } catch (error) {
+        console.error(`Error generating embeddings for batch ${Math.floor(i/MAX_BATCH_SIZE) + 1}:`, error);
+      }
+    }
+    
+    return chunksWithEmbeddings;
+  };
+  
+  interface ChunkResult {
+    id: string;
+    text: string;
+    heading: string;
+  }
+  
+  // Function to chunk document text
+  const chunkDocument = (text: string): ChunkResult[] => {
+    // Simple chunking by paragraphs and headings
+    const chunks: ChunkResult[] = [];
+    let id = 0;
+    
+    // Split by double newlines (paragraphs)
+    const paragraphs = text.split(/\n\s*\n/);
+    
+    let currentHeading = "Introduction";
+    for (const paragraph of paragraphs) {
+      if (!paragraph.trim()) continue;
+      
+      // Check if this paragraph is a heading
+      const headingMatch = paragraph.match(/^(#+\s+|[A-Z][A-Z\s]+:|[0-9]+\.[0-9]+\s+)(.+)$/m);
+      
+      if (headingMatch) {
+        currentHeading = headingMatch[2].trim();
+        // Add the heading as its own chunk
         chunks.push({
-          id: `chunk_${chunkId++}`,
-          text: paragraph.trim()
+          id: `${id++}`,
+          text: paragraph.trim(),
+          heading: currentHeading
+        });
+      } else {
+        // Add as regular paragraph
+        chunks.push({
+          id: `${id++}`,
+          text: paragraph.trim(),
+          heading: currentHeading
         });
       }
-    });
+    }
     
-    console.log(`Created ${chunks.length} chunks from document`);
     return chunks;
   };
-
-  // Function to generate query embeddings
-  const generateQueryEmbedding = async (query: string): Promise<number[]> => {
+  
+  // Function to generate embeddings for multiple texts in a single API call
+  const generateEmbeddings = async (texts: string[]): Promise<number[][]> => {
     try {
+      // Get the OpenAI client only when needed
+      const openai = getOpenAIClient();
+      
+      console.log(`Generating embeddings for ${texts.length} texts in a single API call`);
       const response = await openai.embeddings.create({
         model: "text-embedding-3-small",
-        input: query,
+        input: texts,
+        encoding_format: "float"
       });
       
-      return response.data[0].embedding;
+      // Extract embeddings in the same order as input texts
+      return response.data.map(item => item.embedding);
     } catch (error) {
-      console.error('Error generating query embedding:', error);
-      throw new Error('Failed to generate query embedding');
+      console.error('Error generating embeddings:', error);
+      throw new Error('Failed to generate embeddings');
     }
   };
-
-  // Function to generate multiple query variations
+  
+  // Function to generate variations of the query for better retrieval
   const generateQueryVariations = (query: string): string[] => {
-    // Simple variations for now
-    return [
+    // Add some simple variations to improve retrieval
+    const variations = [
       query,
-      `What does the contract say about ${query.toLowerCase()}?`,
-      `Find information about ${query.toLowerCase()} in the contract`
+      `What does the contract say about ${query}?`,
+      `Find clauses related to ${query}`,
+      `${query} according to the contract`
     ];
+    
+    return variations;
   };
-
-  // Function to calculate cosine similarity
+  
+  // Function to calculate cosine similarity between two vectors
   const cosineSimilarity = (vecA: number[], vecB: number[]): number => {
     let dotProduct = 0;
     let normA = 0;
@@ -269,18 +246,36 @@ export function useContractQA(contractId: string) {
       const queryVariations = generateQueryVariations(query);
       console.log('Generated query variations:', queryVariations);
       
-      // Generate embeddings for each variation
-      const queryEmbeddings: number[][] = [];
-      for (const variation of queryVariations) {
-        const embedding = await generateQueryEmbedding(variation);
-        queryEmbeddings.push(embedding);
+      // Generate embeddings for all query variations in a single API call
+      const queryEmbeddings = await generateEmbeddings(queryVariations);
+      console.log(`Generated ${queryEmbeddings.length} query embeddings`);
+      
+      // Identify chunks that need embeddings
+      const chunksNeedingEmbeddings = contractChunks.filter(chunk => !chunk.embedding);
+      
+      // If any chunks need embeddings, generate them in batches
+      if (chunksNeedingEmbeddings.length > 0) {
+        console.log(`Generating embeddings for ${chunksNeedingEmbeddings.length} chunks that don't have them yet`);
+        const updatedChunks = await generateEmbeddingsForChunks(chunksNeedingEmbeddings);
+        
+        // Update the chunks with their new embeddings
+        for (const updatedChunk of updatedChunks) {
+          const index = contractChunks.findIndex(c => c.id === updatedChunk.id);
+          if (index !== -1 && updatedChunk.embedding) {
+            contractChunks[index].embedding = updatedChunk.embedding;
+          }
+        }
       }
       
       // Calculate similarity scores for each chunk against each query variation
       const chunkScores: {chunk: ContractChunk, score: number}[] = [];
       
       for (const chunk of contractChunks) {
-        if (!chunk.embedding) continue;
+        // Skip chunks without embeddings (shouldn't happen after the above step)
+        if (!chunk.embedding) {
+          console.warn(`Chunk ${chunk.id} still has no embedding, skipping`);
+          continue;
+        }
         
         // Calculate max similarity across all query variations
         let maxScore = -1;
@@ -334,6 +329,9 @@ export function useContractQA(contractId: string) {
       console.log('Using context:', context.substring(0, 100) + '...');
       
       // Call OpenAI for answer
+      // Get the OpenAI client only when needed
+      const openai = getOpenAIClient();
+      
       const response = await openai.chat.completions.create({
         model: "gpt-4o",
         temperature: 0.2,

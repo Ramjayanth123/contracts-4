@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -24,6 +24,62 @@ export default function ClauseExtraction({ contractId, documentText }: ClauseExt
       console.error('Clause extraction failed', err);
     }
   });
+
+  // Create a compatibility adapter for the new macro_summary structure
+  const compatibleResult = useMemo(() => {
+    if (!result || !result.macro_summary) return null;
+
+    // Create a compatible summary structure from the new macro_summary format
+    return {
+      ...result,
+      summary: {
+        executive_summary: result.macro_summary.risk_assessment || 'No summary available',
+        key_findings: [
+          { category: 'Commercial', highlights: 'Key commercial points: ' + (result.macro_summary.key_points?.[0] || 'None found') },
+          { category: 'Legal', highlights: 'Key legal points: ' + (result.macro_summary.key_points?.[1] || 'None found') },
+          { category: 'Compliance', highlights: 'Key compliance points: ' + (result.macro_summary.key_points?.[2] || 'None found') },
+          { category: 'Operational', highlights: 'Key operational points: ' + (result.macro_summary.key_points?.[3] || 'None found') }
+        ],
+        potential_issues: result.macro_summary.recommendations || ['No specific recommendations'],
+        clauses: (result.analyses || []).flatMap(analysis => {
+          const clauses = [];
+          if (analysis.commercial?.found) {
+            clauses.push({
+              department: 'Commercial',
+              clause_type: analysis.commercial.clause_type || 'Commercial Clause',
+              summary: analysis.commercial.summary || 'No summary available',
+              importance: analysis.commercial.importance || 'Medium'
+            });
+          }
+          if (analysis.legal?.found) {
+            clauses.push({
+              department: 'Legal',
+              clause_type: analysis.legal.clause_type || 'Legal Clause',
+              summary: analysis.legal.summary || 'No summary available',
+              importance: analysis.legal.importance || 'Medium'
+            });
+          }
+          if (analysis.compliance?.found) {
+            clauses.push({
+              department: 'Compliance',
+              clause_type: analysis.compliance.clause_type || 'Compliance Clause',
+              summary: analysis.compliance.summary || 'No summary available',
+              importance: analysis.compliance.importance || 'Medium'
+            });
+          }
+          if (analysis.operational?.found) {
+            clauses.push({
+              department: 'Operational',
+              clause_type: analysis.operational.clause_type || 'Operational Clause',
+              summary: analysis.operational.summary || 'No summary available',
+              importance: analysis.operational.importance || 'Medium'
+            });
+          }
+          return clauses;
+        })
+      }
+    };
+  }, [result]);
 
   const handleExtractClauses = async () => {
     if (!documentText) {
@@ -81,7 +137,7 @@ export default function ClauseExtraction({ contractId, documentText }: ClauseExt
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Error</AlertTitle>
             <AlertDescription>
-              Failed to extract clauses: {error.message}
+              Failed to extract clauses: {error}
             </AlertDescription>
           </Alert>
         )}
@@ -98,7 +154,7 @@ export default function ClauseExtraction({ contractId, documentText }: ClauseExt
           </div>
         )}
 
-        {isDocumentTextAvailable && !result && !isLoading && (
+        {isDocumentTextAvailable && !compatibleResult && !isLoading && (
           <div className="flex flex-col items-center justify-center py-8">
             <FileText className="h-12 w-12 text-muted-foreground mb-4" />
             <p className="text-muted-foreground text-center mb-6">
@@ -127,7 +183,7 @@ export default function ClauseExtraction({ contractId, documentText }: ClauseExt
           </div>
         )}
 
-        {result && (
+        {compatibleResult && (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="grid grid-cols-4 mb-4">
               <TabsTrigger value="summary">Summary</TabsTrigger>
@@ -141,14 +197,14 @@ export default function ClauseExtraction({ contractId, documentText }: ClauseExt
                 <div>
                   <h3 className="text-lg font-medium mb-2">Executive Summary</h3>
                   <p className="text-sm text-muted-foreground">
-                    {result.summary.executive_summary}
+                    {compatibleResult.summary.executive_summary}
                   </p>
                 </div>
                 
                 <div>
                   <h3 className="text-lg font-medium mb-2">Key Findings</h3>
                   <div className="grid gap-2">
-                    {result.summary.key_findings.map((finding: any, index: number) => (
+                    {compatibleResult.summary.key_findings.map((finding: any, index: number) => (
                       <Card key={index}>
                         <CardHeader className="py-2 px-4">
                           <Badge variant={getDepartmentBadgeVariant(finding.category)}>
@@ -163,7 +219,7 @@ export default function ClauseExtraction({ contractId, documentText }: ClauseExt
                   </div>
                 </div>
                 
-                {result.summary.potential_issues.length > 0 && (
+                {compatibleResult.summary.potential_issues.length > 0 && (
                   <div>
                     <h3 className="text-lg font-medium mb-2">Potential Issues</h3>
                     <Alert>
@@ -171,7 +227,7 @@ export default function ClauseExtraction({ contractId, documentText }: ClauseExt
                       <AlertTitle>Issues to Consider</AlertTitle>
                       <AlertDescription>
                         <ul className="list-disc pl-5 space-y-1">
-                          {result.summary.potential_issues.map((issue: string, index: number) => (
+                          {compatibleResult.summary.potential_issues.map((issue: string, index: number) => (
                             <li key={index} className="text-sm">{issue}</li>
                           ))}
                         </ul>
@@ -206,7 +262,7 @@ export default function ClauseExtraction({ contractId, documentText }: ClauseExt
         )}
       </CardContent>
       
-      {result && (
+      {compatibleResult && (
         <CardFooter className="flex justify-between border-t px-6 py-4">
           <div className="flex items-center text-sm text-muted-foreground">
             <CheckCircle2 className="h-4 w-4 mr-1" />
@@ -222,7 +278,7 @@ export default function ClauseExtraction({ contractId, documentText }: ClauseExt
 
   // Helper function to render clauses by department
   function renderClausesByDepartment(department: string) {
-    const clauses = result?.summary?.clauses?.filter((clause: any) => 
+    const clauses = compatibleResult?.summary?.clauses?.filter((clause: any) => 
       clause.department === department
     ) || [];
 

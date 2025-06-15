@@ -1,52 +1,52 @@
-import openai from './openai-client';
+import { getOpenAIClient } from './openai-client';
 
-export async function validateDocumentStructure(text: string) {
-  try {
-    console.log('Starting document structure validation...');
-    
-    const prompt = `
-You are a document structure analyzer. You need to determine if the provided contract text has a clear numbered structure.
-
-TASK:
-Examine the text and determine if it follows a formal numbered clause structure (e.g., sections labeled as 1.1, 1.2, 2.1, etc., or similar patterns like "Article 1", "Section 2", etc.).
-
-RULES:
-1. Look for consistent numbering patterns throughout the document
-2. Check if major sections and subsections are clearly delineated with numbers
-3. Determine if the document follows a hierarchical structure
-
-OUTPUT FORMAT:
-Please respond with a JSON object containing:
-{
-  "is_structured": true/false,
-  "structure_type": "numbered_clauses"/"article_sections"/"unstructured"/"other",
-  "confidence": 0-1 (decimal representing confidence in your assessment),
-  "reasoning": "Brief explanation of why you made this determination"
+export interface ValidationResult {
+  is_structured: boolean;
+  structure_type?: string;
+  confidence?: number;
+  suggested_approach?: string;
 }
-`;
 
-    // Get a sample of the text to analyze (first 2000 chars + middle 1000 chars + last 1000 chars)
-    const textSample = getSampleText(text);
-    console.log(`Created text sample of ${textSample.length} characters`);
+export async function validateDocumentStructure(text: string): Promise<ValidationResult> {
+  try {
+    console.log('Validating document structure...');
     
-    // Explicitly tell the model to return JSON
-    const userContent = 'Please analyze this document text and return a JSON response about its structure:\n\n' + textSample;
+    // Use a sample of the document to determine structure
+    const maxSampleLength = 5000;
+    const sample = text.length > maxSampleLength ? text.substring(0, maxSampleLength) : text;
     
     console.log('Calling OpenAI API for structure validation...');
+    
+    // Get the OpenAI client only when needed
+    const openai = getOpenAIClient();
+    
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
-        { role: "system", content: prompt },
-        { role: "user", content: userContent }
+        { 
+          role: "system", 
+          content: "You are a document structure analyzer. Your task is to analyze the structure of legal documents and determine if they follow a clear, structured format with numbered sections or if they are unstructured."
+        },
+        { 
+          role: "user", 
+          content: `Analyze the structure of this document sample and determine if it follows a structured format with numbered sections, headings, etc. Return a JSON object with:
+          - is_structured: boolean indicating if the document has clear structure
+          - structure_type: description of structure (e.g., "numbered sections", "article-based", "unstructured")
+          - confidence: number between 0-1 indicating confidence in assessment
+          - suggested_approach: recommended approach for processing ("semantic" or "pattern-based")
+          
+          Document sample:
+          ${sample}`
+        }
       ],
       response_format: { type: "json_object" }
     });
-
+    
     console.log('OpenAI API response received');
     
     try {
       const result = JSON.parse(response.choices[0].message.content);
-      console.log(`Document structure validation result: ${result.is_structured ? 'structured' : 'unstructured'}, type: ${result.structure_type}, confidence: ${result.confidence}`);
+      console.log('Document structure validation result:', result);
       return result;
     } catch (parseError) {
       console.error('Failed to parse OpenAI response as JSON:', parseError);
@@ -55,19 +55,13 @@ Please respond with a JSON object containing:
     }
   } catch (error) {
     console.error('Error validating document structure:', error);
-    throw error;
+    return {
+      is_structured: false,
+      structure_type: 'unknown',
+      confidence: 0,
+      suggested_approach: 'semantic'
+    };
   }
-}
-
-// Helper function to get a representative sample of the document
-function getSampleText(text: string): string {
-  if (text.length <= 4000) return text;
-  
-  const start = text.substring(0, 2000);
-  const middle = text.substring(Math.floor(text.length / 2) - 500, Math.floor(text.length / 2) + 500);
-  const end = text.substring(text.length - 1000);
-  
-  return `${start}\n\n[...]\n\n${middle}\n\n[...]\n\n${end}`;
 }
 
 // Express-like handler for API routes
@@ -80,7 +74,7 @@ export default async function handler(req: Request) {
   }
 
   try {
-    console.log('Structure validation API called');
+    console.log('Document structure validation API called');
     const { text } = await req.json();
     
     if (!text) {

@@ -60,18 +60,15 @@ export default async function analyzeRisks(request: Request): Promise<Response> 
     const textToAnalyze = text || SAMPLE_RISKY_TEXT; // Use sample text for testing if needed
     const textChunks = chunks || splitTextIntoChunks(textToAnalyze);
     
-    // Analyze the chunks
+    // Analyze the chunks with the combined approach
     console.log(`Analyzing ${textChunks.length} chunks for risks...`);
-    const analysisResults = await analyzeChunks(textChunks);
-    
-    // Aggregate the risks
-    const aggregatedRisks = aggregateRisks(analysisResults);
+    const allRisks = await analyzeChunks(textChunks);
     
     // Group risks by severity
     const risksBySeverity = {
-      High: aggregatedRisks.filter(risk => risk.severity === 'High'),
-      Medium: aggregatedRisks.filter(risk => risk.severity === 'Medium'),
-      Low: aggregatedRisks.filter(risk => risk.severity === 'Low')
+      High: allRisks.filter(risk => risk.severity === 'High'),
+      Medium: allRisks.filter(risk => risk.severity === 'Medium'),
+      Low: allRisks.filter(risk => risk.severity === 'Low')
     };
     
     // Calculate risk score (1-10)
@@ -86,13 +83,13 @@ export default async function analyzeRisks(request: Request): Promise<Response> 
     const isSampleText = !text || text.trim() === '';
     
     return new Response(JSON.stringify({
-      risks: aggregatedRisks,
+      risks: allRisks,
       risksBySeverity,
       riskScore,
       executiveSummary,
       sampleText: isSampleText ? SAMPLE_RISKY_TEXT : null,
       stats: {
-        totalRisks: aggregatedRisks.length,
+        totalRisks: allRisks.length,
         highRisks: risksBySeverity.High.length,
         mediumRisks: risksBySeverity.Medium.length,
         lowRisks: risksBySeverity.Low.length

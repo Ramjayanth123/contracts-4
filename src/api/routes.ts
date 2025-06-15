@@ -1,4 +1,5 @@
 import validateStructure from './clause-extraction/validate-structure';
+import extractStructure from './clause-extraction/extract-structure';
 import chunkDocument from './clause-extraction/chunk-document';
 import analyzeChunks from './clause-extraction/analyze-chunks';
 import macroSummary from './clause-extraction/macro-summary';
@@ -7,6 +8,7 @@ import analyzeRisks from './risk-detection/analyze-risks';
 // Define routes for API endpoints
 const routes = {
   '/api/clause-extraction/validate-structure': validateStructure,
+  '/api/clause-extraction/extract-structure': extractStructure,
   '/api/clause-extraction/chunk-document': chunkDocument,
   '/api/clause-extraction/analyze-chunks': analyzeChunks,
   '/api/clause-extraction/macro-summary': macroSummary,

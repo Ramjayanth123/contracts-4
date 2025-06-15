@@ -4,7 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDocumentUpload } from '@/hooks/useDocumentUpload';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, ArrowRight, Diff, FileText } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Diff, FileText, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
+import { compareContractVersions, ComparisonResult } from '@/services/ContractComparisonAgent';
+import { useToast } from '@/hooks/use-toast';
 
 interface VersionCompareProps {
   contractId: string;
@@ -25,13 +29,13 @@ const VersionCompare = ({ contractId, onClose, initialVersion1, initialVersion2 
   const [comparing, setComparing] = useState(false);
   const [version1, setVersion1] = useState<string>('');
   const [version2, setVersion2] = useState<string>('');
-  const [comparisonResult, setComparisonResult] = useState<{
-    version1?: Version;
-    version2?: Version;
-    differences?: string[];
-  } | null>(null);
+  const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState('executive');
+  const [progress, setProgress] = useState<{step: number, total: number, message: string} | null>(null);
   
   const { getDocumentVersions, compareVersions } = useDocumentUpload();
+  const { toast } = useToast();
 
   useEffect(() => {
     const fetchVersions = async () => {
@@ -71,236 +75,311 @@ const VersionCompare = ({ contractId, onClose, initialVersion1, initialVersion2 
     if (!compareV1 || !compareV2) return;
     
     setComparing(true);
+    setComparisonResult(null);
+    setComparisonError(null);
+    setProgress({step: 1, total: 5, message: 'Retrieving contract versions...'});
+    
     try {
+      // Get the raw version data
       const result = await compareVersions(
         contractId, 
         compareV1, 
         compareV2
       );
       
-      if (result) {
-        // Simple diff implementation - in a real app, you'd use a proper diff algorithm
-        const differences = findDifferences(
-          result.version1?.extracted_content || '',
-          result.version2?.extracted_content || ''
-        );
-        
-        setComparisonResult({
-          version1: result.version1,
-          version2: result.version2,
-          differences
-        });
+      if (!result) {
+        throw new Error("Failed to retrieve version data");
       }
-    } catch (error) {
+      
+      // Check if we have content for both versions
+      if (!result.version1?.extracted_content) {
+        throw new Error(`Version ${compareV1} has no content to compare`);
+      }
+      
+      if (!result.version2?.extracted_content) {
+        throw new Error(`Version ${compareV2} has no content to compare`);
+      }
+      
+      // Start the AI-powered comparison
+      toast({
+        title: "Analysis Started",
+        description: "AI is analyzing contract differences. This may take a few minutes.",
+      });
+      
+      // Use the agent-based comparison service
+      // Set up progress tracking with a simple interval
+      let currentStep = 1;
+      const progressInterval = setInterval(() => {
+        // Simulate progress updates
+        if (currentStep < 5) {
+          currentStep++;
+          const messages = [
+            'Retrieving contract versions...',
+            'Chunking contracts into sections...',
+            'Analyzing clauses by department...',
+            'Generating departmental summaries...',
+            'Comparing versions and creating executive summary...'
+          ];
+          setProgress({
+            step: currentStep,
+            total: 5,
+            message: messages[currentStep - 1]
+          });
+        }
+      }, 15000); // Update every 15 seconds
+      
+      const aiComparison = await compareContractVersions(
+        result.version1,
+        result.version2
+      );
+      
+      // Clear the interval once done
+      clearInterval(progressInterval);
+      
+      setComparisonResult(aiComparison);
+      
+      toast({
+        title: "Analysis Complete",
+        description: "Contract comparison analysis is ready to view.",
+      });
+    } catch (error: any) {
       console.error('Error comparing versions:', error);
+      setComparisonError(error.message || 'Failed to compare versions. Please try again.');
+      
+      toast({
+        title: "Analysis Failed",
+        description: error.message || "Failed to complete contract comparison.",
+        variant: "destructive"
+      });
     } finally {
       setComparing(false);
+      setProgress(null);
     }
   };
 
-  // Simple difference finder - in a real app, you'd use a proper diff library
-  const findDifferences = (text1: string, text2: string): string[] => {
-    const lines1 = text1.split('\n');
-    const lines2 = text2.split('\n');
-    const differences: string[] = [];
+  // Render the progress indicator
+  const renderProgress = () => {
+    if (!progress) return null;
     
-    // Find lines that are in version2 but not in version1
-    for (let i = 0; i < lines2.length; i++) {
-      if (!lines1.includes(lines2[i])) {
-        differences.push(`+ ${lines2[i]}`);
-      }
-    }
-    
-    // Find lines that are in version1 but not in version2
-    for (let i = 0; i < lines1.length; i++) {
-      if (!lines2.includes(lines1[i])) {
-        differences.push(`- ${lines1[i]}`);
-      }
-    }
-    
-    return differences;
+    return (
+      <div className="space-y-4">
+        <div className="text-center">
+          <p className="text-lg font-medium">{progress.message}</p>
+          <p className="text-sm text-muted-foreground">Step {progress.step} of {progress.total}</p>
+        </div>
+        
+        <div className="w-full bg-secondary rounded-full h-2.5">
+          <div 
+            className="bg-primary h-2.5 rounded-full transition-all duration-500" 
+            style={{ width: `${(progress.step / progress.total) * 100}%` }}
+          ></div>
+        </div>
+        
+        <div className="flex justify-center mt-4">
+          <div className="animate-pulse flex space-x-4">
+            <div className="h-3 w-3 bg-primary rounded-full"></div>
+            <div className="h-3 w-3 bg-primary rounded-full"></div>
+            <div className="h-3 w-3 bg-primary rounded-full"></div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
-  if (loading) {
-    return (
-      <Card className="glass-card border-white/10">
-        <CardHeader>
-          <CardTitle>Compare Versions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="p-4 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading versions...</p>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+  // Render the comparison results
+  const renderComparisonResults = () => {
+    if (comparing || progress) {
+      return renderProgress();
+    }
 
-  if (versions.length < 2) {
-    return (
-      <Card className="glass-card border-white/10">
-        <CardHeader>
-          <CardTitle>Compare Versions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="p-4 text-center">
-            <p className="text-muted-foreground">At least two versions are required for comparison</p>
-            <Button onClick={onClose} className="mt-4">Close</Button>
+    if (comparisonError) {
+      return (
+        <div className="p-4 border border-destructive/20 bg-destructive/10 rounded-md">
+          <div className="flex items-center gap-2 text-destructive">
+            <AlertCircle size={16} />
+            <p>Error: {comparisonError}</p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      );
+    }
+
+    if (!comparisonResult) {
+      return null;
+    }
+
+    // Debug check to ensure we're not rendering objects directly
+    const safeRender = (value: any): string => {
+      if (value === null || value === undefined) return '';
+      if (typeof value === 'object') return JSON.stringify(value);
+      return String(value);
+    };
+
+    return (
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid grid-cols-5 mb-4">
+          <TabsTrigger value="executive">Executive Summary</TabsTrigger>
+          <TabsTrigger value="legal">Legal</TabsTrigger>
+          <TabsTrigger value="commercial">Commercial</TabsTrigger>
+          <TabsTrigger value="compliance">Compliance</TabsTrigger>
+          <TabsTrigger value="operational">Operational</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="executive" className="space-y-4">
+          <Card className="glass-card border-white/10">
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <span>Executive Summary</span>
+                <Badge variant={
+                  comparisonResult.executive_summary.risk_score_delta > 0 ? "destructive" : 
+                  comparisonResult.executive_summary.risk_score_delta < 0 ? "outline" : "outline"
+                }>
+                  Risk Δ: {comparisonResult.executive_summary.risk_score_delta > 0 ? '+' : ''}
+                  {safeRender(comparisonResult.executive_summary.risk_score_delta)}
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <h4 className="font-medium mb-2">Summary</h4>
+                <p className="whitespace-pre-wrap">{safeRender(comparisonResult.executive_summary.summary)}</p>
+              </div>
+              
+              <div>
+                <h4 className="font-medium mb-2">Favorability Shift</h4>
+                <Badge variant={
+                  comparisonResult.executive_summary.favorability_shift.toLowerCase().includes('vendor') ? "destructive" :
+                  comparisonResult.executive_summary.favorability_shift.toLowerCase().includes('buyer') ? "secondary" : "outline"
+                }>
+                  {safeRender(comparisonResult.executive_summary.favorability_shift)}
+                </Badge>
+              </div>
+              
+              <div>
+                <h4 className="font-medium mb-2">Flagged Departments</h4>
+                <div className="flex gap-2 flex-wrap">
+                  {comparisonResult.executive_summary.flagged_departments.length > 0 ? (
+                    comparisonResult.executive_summary.flagged_departments.map(dept => (
+                      <Badge key={dept} variant="secondary" className="cursor-pointer" 
+                        onClick={() => setActiveTab(dept)}>
+                        {dept.charAt(0).toUpperCase() + dept.slice(1)}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-muted-foreground">No departments flagged</span>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Department tabs */}
+        {comparisonResult.diffs.map(diff => (
+          <TabsContent key={diff.department} value={diff.department} className="space-y-4">
+            <Card className="glass-card border-white/10">
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <span>{diff.department.charAt(0).toUpperCase() + diff.department.slice(1)} Changes</span>
+                  <Badge variant={diff.changed ? "default" : "outline"}>
+                    {diff.changed ? "Changes Detected" : "No Changes"}
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {diff.changed ? (
+                  <>
+                    <div>
+                      <h4 className="font-medium mb-2">Key Differences</h4>
+                      <p className="whitespace-pre-wrap">{safeRender(diff.diff)}</p>
+                    </div>
+                    
+                    <div>
+                      <h4 className="font-medium mb-2">Business Impact</h4>
+                      <p className="whitespace-pre-wrap">{safeRender(diff.impact)}</p>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4 mt-4">
+                      <div className="border p-3 rounded-md bg-background/50">
+                        <h5 className="text-sm font-medium mb-1 flex items-center">
+                          <span className="mr-2">Version {safeRender(comparisonResult.v1.version_number)}</span>
+                        </h5>
+                        <p className="text-sm whitespace-pre-wrap">{safeRender(diff.v1_summary)}</p>
+                      </div>
+                      <div className="border p-3 rounded-md bg-background/50">
+                        <h5 className="text-sm font-medium mb-1 flex items-center">
+                          <span className="mr-2">Version {safeRender(comparisonResult.v2.version_number)}</span>
+                        </h5>
+                        <p className="text-sm whitespace-pre-wrap">{safeRender(diff.v2_summary)}</p>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <CheckCircle size={16} className="text-success" />
+                    <p>No significant changes detected in {diff.department} terms between versions.</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        ))}
+      </Tabs>
     );
-  }
+  };
 
   return (
-    <Card className="glass-card border-white/10">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Diff className="w-5 h-5" />
-          Compare Versions
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-6">
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <label className="text-sm font-medium mb-2 block">From Version</label>
-              <Select
-                value={version1}
-                onValueChange={setVersion1}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select version" />
-                </SelectTrigger>
-                <SelectContent>
-                  {versions.map(version => (
-                    <SelectItem 
-                      key={version.id} 
-                      value={String(version.version_number)}
-                    >
-                      Version {version.version_number}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="flex items-center justify-center">
-              <ArrowRight className="w-6 h-6 text-muted-foreground" />
-            </div>
-            
-            <div className="flex-1">
-              <label className="text-sm font-medium mb-2 block">To Version</label>
-              <Select
-                value={version2}
-                onValueChange={setVersion2}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select version" />
-                </SelectTrigger>
-                <SelectContent>
-                  {versions.map(version => (
-                    <SelectItem 
-                      key={version.id} 
-                      value={String(version.version_number)}
-                    >
-                      Version {version.version_number}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          
-          <div className="flex justify-center gap-4">
-            <Button onClick={() => handleCompare()} disabled={!version1 || !version2 || comparing}>
-              {comparing ? 'Comparing...' : 'Compare Versions'}
-            </Button>
-            <Button variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-          </div>
-          
-          {comparisonResult && (
-            <div className="mt-6">
-              <Tabs defaultValue="diff">
-                <TabsList className="grid grid-cols-3 mb-4">
-                  <TabsTrigger value="diff" className="flex items-center gap-2">
-                    <Diff className="w-4 h-4" />
-                    Differences
-                  </TabsTrigger>
-                  <TabsTrigger value="v1" className="flex items-center gap-2">
-                    <FileText className="w-4 h-4" />
-                    Version {version1}
-                  </TabsTrigger>
-                  <TabsTrigger value="v2" className="flex items-center gap-2">
-                    <FileText className="w-4 h-4" />
-                    Version {version2}
-                  </TabsTrigger>
-                </TabsList>
-                
-                <TabsContent value="diff">
-                  <div className="glass-card border-white/10 p-4 rounded-md max-h-96 overflow-auto font-mono text-sm">
-                    {comparisonResult.differences && comparisonResult.differences.length > 0 ? (
-                      <pre>
-                        {comparisonResult.differences.map((line, i) => (
-                          <div 
-                            key={i} 
-                            className={
-                              line.startsWith('+') 
-                                ? 'text-green-400 bg-green-900/20 py-1 px-2' 
-                                : line.startsWith('-') 
-                                  ? 'text-red-400 bg-red-900/20 py-1 px-2' 
-                                  : ''
-                            }
-                          >
-                            {line}
-                          </div>
-                        ))}
-                      </pre>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center p-8 text-center">
-                        <p className="text-muted-foreground mb-2">No differences found</p>
-                        <p className="text-xs text-muted-foreground">The selected versions appear to be identical</p>
-                      </div>
-                    )}
-                  </div>
-                </TabsContent>
-                
-                <TabsContent value="v1">
-                  <div className="glass-card border-white/10 p-4 rounded-md max-h-96 overflow-auto">
-                    <div className="mb-2 flex items-center justify-between">
-                      <h3 className="font-medium">Version {version1} Content</h3>
-                      <span className="text-xs text-muted-foreground">
-                        {comparisonResult.version1?.extracted_content?.length || 0} characters
-                      </span>
-                    </div>
-                    <pre className="text-sm whitespace-pre-wrap">
-                      {comparisonResult.version1?.extracted_content || 'No content available'}
-                    </pre>
-                  </div>
-                </TabsContent>
-                
-                <TabsContent value="v2">
-                  <div className="glass-card border-white/10 p-4 rounded-md max-h-96 overflow-auto">
-                    <div className="mb-2 flex items-center justify-between">
-                      <h3 className="font-medium">Version {version2} Content</h3>
-                      <span className="text-xs text-muted-foreground">
-                        {comparisonResult.version2?.extracted_content?.length || 0} characters
-                      </span>
-                    </div>
-                    <pre className="text-sm whitespace-pre-wrap">
-                      {comparisonResult.version2?.extracted_content || 'No content available'}
-                    </pre>
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </div>
-          )}
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold">Compare Contract Versions</h2>
+      </div>
+      
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium mb-1">Version 1</label>
+          <Select value={version1} onValueChange={setVersion1} disabled={comparing}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select version..." />
+            </SelectTrigger>
+            <SelectContent>
+              {versions.map(version => (
+                <SelectItem key={version.id} value={String(version.version_number)}>
+                  Version {version.version_number}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      </CardContent>
-    </Card>
+        <div>
+          <label className="block text-sm font-medium mb-1">Version 2</label>
+          <Select value={version2} onValueChange={setVersion2} disabled={comparing}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select version..." />
+            </SelectTrigger>
+            <SelectContent>
+              {versions.map(version => (
+                <SelectItem key={version.id} value={String(version.version_number)}>
+                  Version {version.version_number}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      
+      <div className="flex justify-center">
+        <Button 
+          onClick={() => handleCompare()} 
+          disabled={!version1 || !version2 || comparing || progress !== null}
+          className="w-40"
+        >
+          {comparing ? 'Comparing...' : 'Compare'}
+        </Button>
+      </div>
+      
+      <div className="mt-6">
+        {renderComparisonResults()}
+      </div>
+    </div>
   );
 };
 

@@ -551,6 +551,7 @@ export const useDocumentUpload = () => {
   };
 
   const compareVersions = async (contractId: string, version1: number, version2: number) => {
+    console.log(`🔄 Fetching versions ${version1} and ${version2} for contract ${contractId} for comparison...`);
     try {
       const { data, error } = await supabase
         .from('document_uploads')
@@ -559,15 +560,17 @@ export const useDocumentUpload = () => {
         .in('version_number', [version1, version2]);
       
       if (error || !data || data.length !== 2) {
+        console.error('❌ Error retrieving versions for comparison:', error || 'Could not find both versions');
         throw new Error('Could not retrieve both versions for comparison');
       }
       
+      console.log(`✅ Successfully retrieved both versions for comparison`);
       return {
         version1: data.find(d => d.version_number === version1),
         version2: data.find(d => d.version_number === version2)
       };
     } catch (error) {
-      console.error('Error comparing versions:', error);
+      console.error('❌ Error comparing versions:', error);
       return null;
     }
   };

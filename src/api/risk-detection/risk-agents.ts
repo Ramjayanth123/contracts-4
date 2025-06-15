@@ -1,31 +1,36 @@
-import openai from './openai-client';
+import { getOpenAIClient } from './openai-client';
 
 // Define domain-specific risk agent roles
 export const riskAgents = {
-  legal: "You are a Legal Risk Analyst. Detect clauses with legal risk such as unlimited liability, indemnity, or one-sided termination clauses.",
-  compliance: "You are a Compliance Risk Analyst. Detect clauses that could breach regulatory obligations like data protection or export restrictions.",
-  commercial: "You are a Commercial Risk Analyst. Detect vague or unfavorable payment, pricing, or exclusivity terms.",
-  operational: "You are an Operational Risk Analyst. Detect clauses with unclear SLAs, deliverables, or dependencies."
+  legal: "Legal Risk Analyst: Detect clauses with legal risk such as unlimited liability, indemnity, or one-sided termination clauses.",
+  compliance: "Compliance Risk Analyst: Detect clauses that could breach regulatory obligations like data protection or export restrictions.",
+  commercial: "Commercial Risk Analyst: Detect vague or unfavorable payment, pricing, or exclusivity terms.",
+  operational: "Operational Risk Analyst: Detect clauses with unclear SLAs, deliverables, or dependencies."
 };
 
-// Analyze a chunk with a single risk agent
-export async function analyzeWithAgent(role: string, chunkText: string) {
-  console.log(`Analyzing chunk with ${role} agent...`);
+// Combined risk analysis function that analyzes all domains in a single call
+export async function analyzeCombinedRisks(chunkText: string, chunkIndex: number) {
+  console.log(`Analyzing chunk ${chunkIndex} with combined risk agent...`);
   
-  // Updated prompt to be more explicit about the expected response format
+  // Combined prompt for all risk domains
   const prompt = `
 Contract Text:
 ${chunkText}
 
 TASK:
-Analyze the contract text for ${role} risks. Identify specific phrases that present risks.
+Analyze the contract text for ALL of the following risk domains simultaneously:
+1. LEGAL RISKS: Unlimited liability, indemnity, one-sided termination clauses, etc.
+2. COMPLIANCE RISKS: Data protection, export restrictions, regulatory obligations, etc.
+3. COMMERCIAL RISKS: Vague/unfavorable payment terms, pricing, exclusivity, etc.
+4. OPERATIONAL RISKS: Unclear SLAs, deliverables, dependencies, etc.
 
 RESPONSE FORMAT:
-Return a JSON object with a "risks" array containing risk objects. Each risk object should have:
+Return a JSON object with a "risks" array containing risk objects across all domains. Each risk object should have:
 - "phrase": The exact text from the contract that presents a risk
 - "explanation": Why this phrase is risky
 - "severity": "High", "Medium", or "Low"
-- "risk_type": "${role}"
+- "risk_type": The specific type of risk (e.g., "Liability", "Payment Terms", "Data Protection")
+- "domain": The domain of the risk ("legal", "compliance", "commercial", or "operational")
 - "suggestion": A better alternative wording
 
 Example response:
@@ -35,8 +40,17 @@ Example response:
       "phrase": "Company shall have no liability whatsoever",
       "explanation": "This clause completely eliminates liability for the company",
       "severity": "High",
-      "risk_type": "${role}",
+      "risk_type": "Liability",
+      "domain": "legal",
       "suggestion": "Company's liability shall be limited to the fees paid under this agreement"
+    },
+    {
+      "phrase": "Payment shall be made within 90 days of invoice receipt",
+      "explanation": "Extended payment terms create cash flow risk",
+      "severity": "Medium",
+      "risk_type": "Payment Terms",
+      "domain": "commercial",
+      "suggestion": "Payment shall be made within 30 days of invoice receipt"
     }
   ]
 }
@@ -45,17 +59,23 @@ If no risks are found, return {"risks": []}.
 `;
 
   try {
+    // Get the OpenAI client only when needed
+    const openai = getOpenAIClient();
+    
     const res = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
-        { role: "system", content: riskAgents[role] },
+        { 
+          role: "system", 
+          content: "You are a comprehensive Contract Risk Analyst capable of identifying legal, compliance, commercial, and operational risks in contract text. Provide detailed, precise risk analysis with specific phrase identification." 
+        },
         { role: "user", content: prompt }
       ],
       response_format: { type: "json_object" }
     });
 
     const content = res.choices[0].message.content;
-    console.log(`Raw response from ${role} agent:`, content);
+    console.log(`Raw response from combined risk agent:`, content);
     
     // Parse the JSON response
     const parsedResponse = JSON.parse(content);
@@ -63,57 +83,42 @@ If no risks are found, return {"risks": []}.
     // Extract the risks array from the response
     const risks = parsedResponse.risks || [];
     
-    console.log(`${role} agent found ${risks.length} risks`);
+    console.log(`Combined agent found ${risks.length} risks`);
     
-    return { role, risks };
+    // Return the risks with chunk information
+    return risks.map(risk => ({
+      ...risk,
+      chunk: chunkText,
+      chunkIndex
+    }));
   } catch (error) {
-    console.error(`Error in ${role} agent analysis:`, error);
-    return { role, risks: [] };
+    console.error(`Error in combined risk analysis:`, error);
+    return [];
   }
 }
 
-// Analyze a document's chunks with all risk agents in parallel
+// Analyze a document's chunks with the combined risk agent
 export async function analyzeChunks(chunks: string[]) {
   console.log(`Starting risk analysis on ${chunks.length} chunks...`);
   
-  const results = [];
+  const allRisks = [];
+  
   for (const [index, chunk] of chunks.entries()) {
     console.log(`Processing chunk ${index + 1}/${chunks.length}`);
     
-    const tasks = Object.keys(riskAgents).map(role => analyzeWithAgent(role, chunk));
-    const chunkResults = await Promise.all(tasks);
+    // Use the combined risk analysis instead of separate agents
+    const chunkRisks = await analyzeCombinedRisks(chunk, index);
+    allRisks.push(...chunkRisks);
     
-    results.push({ 
-      chunk, 
-      chunkIndex: index,
-      analyses: chunkResults 
-    });
+    console.log(`Found ${chunkRisks.length} risks in chunk ${index + 1}`);
   }
   
-  console.log(`Completed risk analysis on all chunks`);
-  return results;
+  console.log(`Completed risk analysis on all chunks, found ${allRisks.length} total risks`);
+  return allRisks;
 }
 
-// Aggregate and deduplicate all risks from all chunks
-export function aggregateRisks(results: any[]) {
-  console.log(`Aggregating risks from all analyses...`);
-  
-  const allRisks = [];
-  for (const result of results) {
-    for (const analysis of result.analyses) {
-      if (analysis.risks && Array.isArray(analysis.risks)) {
-        for (const risk of analysis.risks) {
-          allRisks.push({
-            ...risk,
-            chunk: result.chunk,
-            chunkIndex: result.chunkIndex,
-            domain: analysis.role
-          });
-        }
-      }
-    }
-  }
-  
-  console.log(`Found a total of ${allRisks.length} risks`);
-  return allRisks;
+// Aggregate function is simplified since risks are already in the correct format
+export function aggregateRisks(risks: any[]) {
+  console.log(`Processing ${risks.length} risks...`);
+  return risks;
 } 
