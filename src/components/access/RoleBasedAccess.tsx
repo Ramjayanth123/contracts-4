@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useAuth } from './AuthProvider';
 import { supabase } from '@/integrations/supabase/client';
@@ -76,8 +75,8 @@ export const AccessControlProvider = ({ children }: { children: React.ReactNode 
     
     // Define permission matrix
     const permissions = {
-      admin: ['create', 'edit', 'delete', 'view', 'share', 'download'],
-      legal: ['create', 'edit', 'view', 'share', 'download'],
+      admin: ['create', 'edit', 'delete', 'view', 'share', 'download', 'create_document'],
+      legal: ['edit', 'view', 'share', 'download'],
       viewer: ['view']
     };
     

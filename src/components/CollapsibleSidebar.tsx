@@ -13,7 +13,10 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
-  User
+  User,
+  Users,
+  Scale,
+  PenTool
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/components/access/AuthProvider';
@@ -23,6 +26,9 @@ const navigationItems = [
   { name: 'Dashboard', href: '/', icon: Home },
   { name: 'Contracts', href: '/contracts', icon: FileText },
   { name: 'Workflows', href: '/workflows', icon: Workflow },
+  { name: 'Workflow Dashboard', href: '/workflow/dashboard', icon: Users, requiredRoles: ['admin'] },
+  { name: 'Legal Review', href: '/workflow/legal-review', icon: Scale, requiredRoles: ['legal'] },
+  { name: 'Document Signature', href: '/workflow/signature', icon: PenTool, requiredRoles: ['viewer'] },
   { name: 'Analytics', href: '/analytics', icon: BarChart3 },
   { name: 'Reports', href: '/reports', icon: Database },
   { name: 'Administration', href: '/administration', icon: Shield, requiredRoles: ['admin'] },

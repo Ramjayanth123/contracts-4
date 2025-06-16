@@ -20,8 +20,8 @@ We've implemented a text-diff based pre-processing step that:
 We've implemented a tiered approach to model usage:
 
 - Uses initial classification to determine complexity and impact of changes
-- Routes high-complexity/high-impact changes to GPT-4 for detailed analysis
-- Routes medium-complexity changes to GPT-3.5-Turbo (1/5 the cost of GPT-4)
+- Routes all changes to GPT-4o-mini for cost-effective analysis
+- Uses GPT-4o-mini (70% cheaper than GPT-3.5-Turbo)
 - Uses simplified analysis for low-complexity changes without AI calls
 
 **Impact:** Reduces high-tier model usage by 60-80%
@@ -32,7 +32,7 @@ We've implemented a tiered approach to model usage:
 
 - `identifyChangedSections()`: Identifies changed sections between two texts
 - `isFormattingChangeOnly()`: Detects changes that are only formatting/whitespace
-- `classifyChangeComplexity()`: Uses GPT-3.5-Turbo to classify change complexity
+- `classifyChangeComplexity()`: Uses GPT-4o-mini to classify change complexity
 
 ### Two-Tier Analysis (`ContractComparisonAgent.ts`)
 
@@ -64,4 +64,4 @@ Potential future optimizations include:
 1. **Batch Processing**: Combine multiple chunks into single API calls
 2. **Caching**: Cache analysis results for standard clauses
 3. **User-Selected Departments**: Allow users to select which departments to analyze
-4. **Local Embedding**: Use local embeddings to detect similar sections 
+4. **Local Embedding**: Use local embeddings to detect similar sections

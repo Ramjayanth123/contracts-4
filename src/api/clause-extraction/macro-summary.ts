@@ -118,7 +118,7 @@ Please provide a macro summary with KEY POINTS, RECOMMENDATIONS, and RISK ASSESS
     
     // Call the OpenAI API
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
@@ -191,4 +191,4 @@ export default async function handler(req: Request) {
       headers: { 'Content-Type': 'application/json' }
     });
   }
-} 
+}

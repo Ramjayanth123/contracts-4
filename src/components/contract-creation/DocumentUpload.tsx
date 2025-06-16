@@ -1,13 +1,24 @@
-
 import React, { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Progress } from '@/components/ui/progress';
-import { Upload, FileText, X, Loader2, AlertCircle, CheckCircle, AlertTriangle } from 'lucide-react';
-import { useDocumentUpload } from '@/hooks/useDocumentUpload';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
+import { useDocumentUpload } from '@/hooks/useDocumentUpload';
+import { useAccessControl } from '@/components/access/RoleBasedAccess';
+import {
+  Upload,
+  File,
+  CheckCircle,
+  AlertCircle,
+  AlertTriangle,
+  Loader2,
+  FileText,
+  DownloadCloud,
+  X,
+  RefreshCcw
+} from 'lucide-react';
 
 interface ExtractedData {
   title?: string;
@@ -30,6 +41,10 @@ const DocumentUpload = ({ onDocumentUpload, uploadedDocument, extractedData, con
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const { uploadDocument, uploading, validateFile, retryDocumentProcessing } = useDocumentUpload();
+  const { hasRole, hasPermission } = useAccessControl();
+  
+  // Check if user has permission to upload documents
+  const canUploadDocuments = hasPermission('create_document');
 
   const handleFile = async (file: File) => {
     console.log('Processing file:', file.name, 'Type:', file.type);
@@ -140,6 +155,11 @@ const DocumentUpload = ({ onDocumentUpload, uploadedDocument, extractedData, con
       <Card className="glass-card">
         <CardHeader>
           <CardTitle>Upload Contract Document</CardTitle>
+          {!canUploadDocuments && (
+            <CardDescription className="text-amber-500">
+              Only administrators can upload documents
+            </CardDescription>
+          )}
         </CardHeader>
         <CardContent>
           {uploadError && (
@@ -150,60 +170,72 @@ const DocumentUpload = ({ onDocumentUpload, uploadedDocument, extractedData, con
           )}
           
           {!uploadedDocument ? (
-            <div
-              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
-                dragActive ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
-              } ${uploading ? 'pointer-events-none opacity-50' : ''}`}
-              onDragEnter={(e) => {
-                e.preventDefault();
-                setDragActive(true);
-              }}
-              onDragLeave={(e) => {
-                e.preventDefault();
-                setDragActive(false);
-              }}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDrop}
-              onClick={() => !uploading && document.getElementById('file-upload')?.click()}
-            >
-              {uploading ? (
-                <Loader2 className="mx-auto h-12 w-12 text-primary animate-spin mb-4" />
-              ) : (
-                <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-              )}
-              <h3 className="text-lg font-medium mb-2">
-                {uploading ? 'Processing Document...' : 'Upload Contract Document'}
-              </h3>
-              <p className="text-muted-foreground mb-4">
-                {uploading 
-                  ? 'Please wait while we extract the content from your document. This may take a few moments for large files.'
-                  : 'Drag and drop your PDF, DOC, DOCX, or TXT document here, or click to browse'
-                }
-              </p>
-              
-              {uploading && uploadProgress > 0 && (
-                <div className="max-w-xs mx-auto mb-4">
-                  <Progress value={uploadProgress} className="w-full" />
-                  <p className="text-sm text-muted-foreground mt-2">
-                    {uploadProgress < 90 ? 'Uploading...' : 'Processing content...'}
+            <>
+              {!canUploadDocuments ? (
+                <div className="border-2 border-dashed rounded-lg p-8 text-center opacity-50 border-muted-foreground/25">
+                  <AlertCircle className="mx-auto h-12 w-12 text-amber-500 mb-4" />
+                  <h3 className="text-lg font-medium mb-2">Permission Restricted</h3>
+                  <p className="text-muted-foreground mb-4">
+                    Only administrators have permission to upload documents
                   </p>
                 </div>
+              ) : (
+                <div
+                  className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
+                    dragActive ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
+                  } ${uploading ? 'pointer-events-none opacity-50' : ''}`}
+                  onDragEnter={(e) => {
+                    e.preventDefault();
+                    setDragActive(true);
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    setDragActive(false);
+                  }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={handleDrop}
+                  onClick={() => !uploading && document.getElementById('file-upload')?.click()}
+                >
+                  {uploading ? (
+                    <Loader2 className="mx-auto h-12 w-12 text-primary animate-spin mb-4" />
+                  ) : (
+                    <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                  )}
+                  <h3 className="text-lg font-medium mb-2">
+                    {uploading ? 'Processing Document...' : 'Upload Contract Document'}
+                  </h3>
+                  <p className="text-muted-foreground mb-4">
+                    {uploading 
+                      ? 'Please wait while we extract the content from your document. This may take a few moments for large files.'
+                      : 'Drag and drop your PDF, DOC, DOCX, or TXT document here, or click to browse'
+                    }
+                  </p>
+                  
+                  {uploading && uploadProgress > 0 && (
+                    <div className="max-w-xs mx-auto mb-4">
+                      <Progress value={uploadProgress} className="w-full" />
+                      <p className="text-sm text-muted-foreground mt-2">
+                        {uploadProgress < 90 ? 'Uploading...' : 'Processing content...'}
+                      </p>
+                    </div>
+                  )}
+                  
+                  <Input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                    onChange={handleFileInput}
+                    className="hidden"
+                    id="file-upload"
+                    disabled={uploading}
+                  />
+                  {!uploading && (
+                    <Button variant="outline" className="cursor-pointer">
+                      Choose File
+                    </Button>
+                  )}
+                </div>
               )}
-              
-              <Input
-                type="file"
-                accept=".pdf,.doc,.docx,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-                onChange={handleFileInput}
-                className="hidden"
-                id="file-upload"
-                disabled={uploading}
-              />
-              {!uploading && (
-                <Button variant="outline" className="cursor-pointer">
-                  Choose File
-                </Button>
-              )}
-            </div>
+            </>
           ) : (
             <div className="flex items-center justify-between p-4 border rounded-lg">
               <div className="flex items-center gap-3">

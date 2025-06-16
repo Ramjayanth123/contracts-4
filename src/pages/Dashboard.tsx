@@ -20,6 +20,15 @@ const Dashboard = () => {
     contractValue: 0
   });
 
+  // Force a re-render when component mounts to ensure it loads properly
+  useEffect(() => {
+    // Clear any "lastVisitedPath" that could be causing redirection issues
+    localStorage.setItem('lastVisitedPath', '/');
+    
+    // Component mounted successfully
+    console.log("Dashboard mounted successfully");
+  }, []);
+
   useEffect(() => {
     if (!contractsLoading && contracts.length > 0) {
       calculateKPIs();
@@ -28,13 +37,22 @@ const Dashboard = () => {
 
   const calculateKPIs = () => {
     const totalContracts = contracts.length;
-    const pendingReview = contracts.filter(c => c.status === 'review').length;
     
-    // Calculate executed this month
+    // Consider any review-like status for pending review count
+    const pendingReview = contracts.filter(c => 
+      c.status === 'review' || 
+      c.status?.includes('review') || 
+      c.status?.includes('pending')
+    ).length;
+    
+    // Calculate executed this month - consider all completed-like statuses
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
     const executedThisMonth = contracts.filter(c => {
-      if (c.status === 'executed' || c.status === 'signed') {
+      if (c.status === 'executed' || 
+          c.status === 'signed' || 
+          c.status?.includes('complete') ||
+          c.status?.includes('execute')) {
         const contractDate = new Date(c.updated_at);
         return contractDate.getMonth() === currentMonth && contractDate.getFullYear() === currentYear;
       }

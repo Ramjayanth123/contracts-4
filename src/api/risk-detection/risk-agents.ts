@@ -63,7 +63,7 @@ If no risks are found, return {"risks": []}.
     const openai = getOpenAIClient();
     
     const res = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       messages: [
         { 
           role: "system", 
@@ -121,4 +121,4 @@ export async function analyzeChunks(chunks: string[]) {
 export function aggregateRisks(risks: any[]) {
   console.log(`Processing ${risks.length} risks...`);
   return risks;
-} 
+}

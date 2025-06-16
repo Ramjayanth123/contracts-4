@@ -109,7 +109,7 @@ export async function classifyChangeComplexity(
     }
     
     const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o-mini",
       messages: [
         { 
           role: "system", 
@@ -145,4 +145,4 @@ Only respond with the JSON object, no other text.`
     // Default to medium complexity if classification fails
     return { complexity: 'medium', impact: 'moderate' };
   }
-} 
+}

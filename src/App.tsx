@@ -1,4 +1,3 @@
-import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
@@ -6,6 +5,8 @@ import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { AuthProvider } from "@/components/access/AuthProvider";
 import { ProtectedRoute } from "@/components/access/ProtectedRoute";
 import { AccessControlProvider } from "@/components/access/RoleBasedAccess";
+import { Toaster as UIToaster } from "@/components/ui/toaster";
+import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import Layout from "@/components/layout/Layout";
 import Dashboard from "./pages/Dashboard";
 import Contracts from "./pages/Contracts";
@@ -23,6 +24,10 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import OpenAITest from "./pages/OpenAITest";
 import Index from "./pages/Index";
+import WorkflowDashboard from "@/components/workflow/WorkflowDashboard";
+import LegalReviewDashboard from "@/components/workflow/LegalReviewDashboard";
+import ViewerSignatureDashboard from "@/components/workflow/ViewerSignatureDashboard";
+import SessionRestorer from "@/components/SessionRestorer";
 
 const queryClient = new QueryClient();
 
@@ -30,9 +35,10 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider defaultTheme="dark">
       <TooltipProvider>
-        <Toaster />
+        <SonnerToaster />
         <BrowserRouter>
           <AuthProvider>
+            <SessionRestorer />
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
@@ -50,6 +56,9 @@ const App = () => (
                 <Route path="contracts/create" element={<ContractCreation />} />
                 <Route path="documents" element={<DocumentReview />} />
                 <Route path="workflows" element={<Workflows />} />
+                <Route path="workflow/dashboard" element={<WorkflowDashboard />} />
+                <Route path="workflow/legal-review" element={<LegalReviewDashboard />} />
+                <Route path="workflow/signature" element={<ViewerSignatureDashboard />} />
                 <Route path="analytics" element={<Analytics />} />
                 <Route path="reports" element={<Reports />} />
                 <Route path="administration" element={<Administration />} />
@@ -60,6 +69,7 @@ const App = () => (
             </Routes>
           </AuthProvider>
         </BrowserRouter>
+        <UIToaster />
       </TooltipProvider>
     </ThemeProvider>
   </QueryClientProvider>

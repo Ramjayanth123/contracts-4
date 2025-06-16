@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
@@ -24,18 +23,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const { toast } = useToast();
 
   useEffect(() => {
+    // Keep track of initial load
+    let isInitialLoad = true;
+    
     // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
-        setLoading(false);
-
-        if (event === 'SIGNED_IN' && session) {
-          navigate('/');
+        
+        if (event === 'SIGNED_IN') {
+          // If user explicitly signed in (not just page refresh), redirect to dashboard
+          if (!isInitialLoad) {
+            navigate('/');
+          }
         } else if (event === 'SIGNED_OUT') {
           navigate('/login');
         }
+        
+        setLoading(false);
       }
     );
 
@@ -44,6 +50,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+      // After initial load is complete
+      isInitialLoad = false;
     });
 
     return () => subscription.unsubscribe();

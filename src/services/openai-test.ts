@@ -20,7 +20,7 @@ export async function testOpenAI() {
     console.log('📡 Making test request to OpenAI API...');
     
     const response = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: 'You are a helpful assistant.' },
         { role: 'user', content: 'Say hello!' }
@@ -41,4 +41,4 @@ export async function testOpenAI() {
       message: error.message || 'Unknown error'
     };
   }
-} 
+}

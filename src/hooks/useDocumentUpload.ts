@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/components/access/AuthProvider';
 import { useToast } from '@/hooks/use-toast';
 import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
+import { useAccessControl } from '@/components/access/RoleBasedAccess';
 
 // Configure PDF.js worker using Vite's static asset approach
 const setupPDFWorker = async () => {
@@ -73,6 +74,7 @@ export const useDocumentUpload = () => {
   const [uploading, setUploading] = useState(false);
   const { user } = useAuth();
   const { toast } = useToast();
+  const { hasPermission } = useAccessControl();
 
   // File validation constants
   const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -107,6 +109,16 @@ export const useDocumentUpload = () => {
       toast({
         title: "Error",
         description: "You must be logged in to upload documents",
+        variant: "destructive",
+      });
+      return null;
+    }
+
+    // Check if user has permission to create documents
+    if (!hasPermission('create_document')) {
+      toast({
+        title: "Permission Denied",
+        description: "Only administrators can upload documents",
         variant: "destructive",
       });
       return null;

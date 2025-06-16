@@ -55,7 +55,7 @@ If the document doesn't have a clear structure, create a reasonable structure ba
     
     // Call the OpenAI API
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: `Please extract the structure of this document:\n\n${sampleWords}` }
@@ -125,4 +125,4 @@ export default async function handler(req: Request) {
       headers: { 'Content-Type': 'application/json' }
     });
   }
-} 
+}

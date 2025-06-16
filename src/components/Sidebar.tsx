@@ -1,6 +1,5 @@
-
-import React from 'react';
-import { NavLink } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { 
   Home, 
   FileText, 
@@ -24,6 +23,27 @@ const navigationItems = [
 ];
 
 const Sidebar = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  // Save current path to localStorage whenever it changes
+  useEffect(() => {
+    // Save all paths except the dashboard path to prevent redirect loops
+    if (location.pathname !== '/') {
+      localStorage.setItem('lastVisitedPath', location.pathname);
+    }
+  }, [location.pathname]);
+  
+  // Handle dashboard navigation explicitly
+  const handleNavigation = (e: React.MouseEvent<HTMLAnchorElement>, path: string) => {
+    // For dashboard, force navigation and clear stored path
+    if (path === '/') {
+      e.preventDefault();
+      localStorage.setItem('lastVisitedPath', '/');
+      navigate('/');
+    }
+  };
+  
   return (
     <aside className="w-64 glass-card border-r border-white/10 h-full flex flex-col">
       <div className="p-6 border-b border-white/10">
@@ -38,6 +58,7 @@ const Sidebar = () => {
               className={({ isActive }) =>
                 `nav-item ${isActive ? 'active' : ''}`
               }
+              onClick={(e) => handleNavigation(e, item.href)}
             >
               <item.icon className="w-5 h-5" />
               <span className="font-medium">{item.name}</span>

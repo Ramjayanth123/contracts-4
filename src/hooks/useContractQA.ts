@@ -333,7 +333,7 @@ export function useContractQA(contractId: string) {
       const openai = getOpenAIClient();
       
       const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4o-mini",
         temperature: 0.2,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
@@ -447,4 +447,4 @@ export function useContractQA(contractId: string) {
     clearHistory,
     initialize
   };
-} 
+}

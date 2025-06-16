@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/components/access/AuthProvider';
@@ -9,7 +8,8 @@ export interface Contract {
   title: string;
   description: string | null;
   contract_number: string | null;
-  status: 'draft' | 'review' | 'approved' | 'signed' | 'executed' | 'expired' | 'terminated';
+  status: 'draft' | 'review' | 'approved' | 'signed' | 'executed' | 'expired' | 'terminated' | 'pending_review' | 'pending_signature' | 'rejected' | 'completed';
+  workflow_stage?: string | null; // draft, legal_review, awaiting_signature, rejected, rejected_by_viewer, completed
   counterparty: string | null;
   counterparty_email: string | null;
   start_date: string | null;
@@ -20,6 +20,14 @@ export interface Contract {
   updated_at: string;
   created_by: string | null;
   assigned_to: string | null;
+  legal_reviewer_id?: string | null;
+  viewer_id?: string | null;
+  rejection_reason?: string | null;
+  sent_for_review_at?: string | null;
+  reviewed_at?: string | null;
+  sent_for_signature_at?: string | null;
+  signed_at?: string | null;
+  rejected_at?: string | null;
   tags: string[] | null;
   original_file_name: string | null;
   original_file_size: number | null;
@@ -41,11 +49,35 @@ export const useContracts = () => {
   const { user } = useAuth();
   const { toast } = useToast();
 
+  // Helper function to check if user is associated with a contract
+  const isUserAssociatedWithContract = (contract: Contract, userId: string) => {
+    return (
+      contract.created_by === userId ||
+      contract.assigned_to === userId ||
+      contract.legal_reviewer_id === userId ||
+      contract.viewer_id === userId
+    );
+  };
+
   const fetchContracts = async () => {
     if (!user) return;
     
     try {
-      const { data, error } = await supabase
+      // First, get the user's role
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+        
+      if (profileError) {
+        throw profileError;
+      }
+      
+      const userRole = profileData?.role;
+      
+      // Query contracts based on role
+      const query = supabase
         .from('contracts')
         .select(`
           *,
@@ -53,6 +85,14 @@ export const useContracts = () => {
           profiles_assigned_to:profiles!contracts_assigned_to_fkey(full_name, email)
         `)
         .order('created_at', { ascending: false });
+      
+      // Admin can see all contracts
+      // Legal and viewer roles can only see contracts they're associated with
+      if (userRole !== 'admin') {
+        query.or(`created_by.eq.${user.id},assigned_to.eq.${user.id},legal_reviewer_id.eq.${user.id},viewer_id.eq.${user.id}`);
+      }
+      
+      const { data, error } = await query;
 
       if (error) {
         throw error;
@@ -75,7 +115,43 @@ export const useContracts = () => {
     if (!user) return null;
 
     try {
-      // First, get the document upload record for this contract
+      // First, check if user has permission to access this contract
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+      
+      const userRole = profileData?.role;
+      
+      // Get the contract to check permissions
+      const { data: contractData, error: contractError } = await supabase
+        .from('contracts')
+        .select('*')
+        .eq('id', contractId)
+        .single();
+        
+      if (contractError || !contractData) {
+        console.error('Contract not found or error:', contractError);
+        return null;
+      }
+      
+      // Check if user has permission to access this document
+      const hasPermission = 
+        userRole === 'admin' || 
+        isUserAssociatedWithContract(contractData, user.id);
+      
+      if (!hasPermission) {
+        console.error('User does not have permission to access this document');
+        toast({
+          title: "Access Denied",
+          description: "You don't have permission to access this document",
+          variant: "destructive",
+        });
+        return null;
+      }
+
+      // Now get the document upload record for this contract
       const { data: documentData, error: docError } = await supabase
         .from('document_uploads')
         .select('storage_path, file_name')

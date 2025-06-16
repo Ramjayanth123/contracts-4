@@ -21,7 +21,7 @@ export async function validateDocumentStructure(text: string): Promise<Validatio
     const openai = getOpenAIClient();
     
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       messages: [
         { 
           role: "system", 
@@ -99,4 +99,4 @@ export default async function handler(req: Request) {
       headers: { 'Content-Type': 'application/json' }
     });
   }
-} 
+}

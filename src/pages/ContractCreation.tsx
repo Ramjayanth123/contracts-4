@@ -1,10 +1,10 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileText, Upload, FileIcon, ArrowLeft } from 'lucide-react';
+import { FileText, Upload, FileIcon, ArrowLeft, AlertCircle } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 import BasicInformation from '@/components/contract-creation/BasicInformation';
 import DocumentUpload from '@/components/contract-creation/DocumentUpload';
@@ -12,6 +12,8 @@ import DocumentUpload from '@/components/contract-creation/DocumentUpload';
 import ReviewPreview from '@/components/contract-creation/ReviewPreview';
 import { useContracts } from '@/hooks/useContracts';
 import { useToast } from '@/hooks/use-toast';
+import { useAccessControl } from '@/components/access/RoleBasedAccess';
+import UserSelector from '@/components/workflow/UserSelector';
 
 interface ExtractedData {
   title?: string;
@@ -26,6 +28,7 @@ const ContractCreation = () => {
   const navigate = useNavigate();
   const { createContract } = useContracts();
   const { toast } = useToast();
+  const { hasRole, hasPermission } = useAccessControl();
   
   const [currentStep, setCurrentStep] = useState(0);
   const [creationMethod, setCreationMethod] = useState<'upload' | 'blank'>('upload');
@@ -33,8 +36,51 @@ const ContractCreation = () => {
   const [contractData, setContractData] = useState<any>({});
   const [uploadedDocument, setUploadedDocument] = useState<File | null>(null);
   const [extractedData, setExtractedData] = useState<ExtractedData>({});
+  const [selectedLegalReviewer, setSelectedLegalReviewer] = useState<string>('');
+  const [selectedViewer, setSelectedViewer] = useState<string>('');
 
-  const steps = [
+  const isAdmin = hasRole('admin');
+  
+  // Check if user has permission to create documents, if not redirect to dashboard
+  useEffect(() => {
+    if (!hasPermission('create_document')) {
+      toast({
+        title: "Permission Denied",
+        description: "Only administrators can create contracts",
+        variant: "destructive",
+      });
+      setTimeout(() => {
+        navigate('/');
+      }, 2000);
+    }
+  }, [hasPermission, navigate, toast]);
+
+  // If user doesn't have permission, show message and don't render the rest of the component
+  if (!hasPermission('create_document')) {
+    return (
+      <div className="container mx-auto py-8">
+        <div className="flex justify-between items-center mb-6">
+          <Button variant="outline" onClick={() => navigate('/')}>
+            <ArrowLeft className="mr-2 h-4 w-4" /> Back to Dashboard
+          </Button>
+        </div>
+        
+        <Alert variant="destructive" className="mb-4">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            Only administrators can create contracts. You will be redirected to the dashboard.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  const steps = isAdmin ? [
+    { title: 'Method', description: 'Choose creation method' },
+    { title: 'Details', description: 'Contract information' },
+    { title: 'Workflow', description: 'Assign reviewers' },
+    { title: 'Review', description: 'Review and create' }
+  ] : [
     { title: 'Method', description: 'Choose creation method' },
     { title: 'Details', description: 'Contract information' },
     { title: 'Review', description: 'Review and create' }
@@ -78,6 +124,11 @@ const ContractCreation = () => {
           original_file_size: extractedData.fileSize,
           extracted_content: extractedData.extractedText,
           processing_status: extractedData.processingStatus || 'completed'
+        } : {}),
+        ...(isAdmin ? {
+          legal_reviewer_id: selectedLegalReviewer || null,
+          viewer_id: selectedViewer || null,
+          workflow_stage: 'creation'
         } : {})
       };
 
@@ -161,7 +212,26 @@ const ContractCreation = () => {
       }
     }
 
-    if (currentStep === 2) {
+    if (isAdmin && currentStep === 2) {
+      return (
+        <div className="space-y-6">
+          <div className="text-center mb-6">
+            <h3 className="text-lg font-semibold mb-2">Assign Workflow Reviewers</h3>
+            <p className="text-muted-foreground">
+              Select legal reviewer and viewer for this contract's approval workflow
+            </p>
+          </div>
+          <UserSelector
+            selectedLegalReviewer={selectedLegalReviewer}
+            selectedViewer={selectedViewer}
+            onLegalReviewerChange={setSelectedLegalReviewer}
+            onViewerChange={setSelectedViewer}
+          />
+        </div>
+      );
+    }
+
+    if ((isAdmin && currentStep === 3) || (!isAdmin && currentStep === 2)) {
       return (
         <ReviewPreview 
           contractData={contractData}
@@ -178,6 +248,10 @@ const ContractCreation = () => {
     if (currentStep === 1) {
       if (creationMethod === 'upload') return uploadedDocument && Object.keys(extractedData).length > 0;
       if (creationMethod === 'blank') return contractData.title;
+    }
+    if (isAdmin && currentStep === 2) {
+      // For workflow step, legal reviewer and viewer are optional but recommended
+      return true;
     }
     return true;
   };

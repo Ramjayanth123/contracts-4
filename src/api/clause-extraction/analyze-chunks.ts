@@ -51,7 +51,7 @@ async function analyzeChunk(chunk: ChunkResult): Promise<ChunkAnalysis> {
     // STEP 1: Initial screening with GPT-3.5 Turbo
     console.log(`Performing initial screening of chunk ${chunk.chunk_id} with GPT-3.5 Turbo`);
     const screeningResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o-mini",
       messages: [
         { role: "system", content: screeningPrompt },
         { role: "user", content: chunk.text }
@@ -90,7 +90,7 @@ async function analyzeChunk(chunk: ChunkResult): Promise<ChunkAnalysis> {
       };
     }
     
-    // STEP 2: Detailed analysis with GPT-4, but only for relevant categories
+    // STEP 2: Detailed analysis with GPT-4o-mini, but only for relevant categories
     // Modify the prompt to focus only on relevant categories
     let detailedPrompt = `
 You are a comprehensive contract analysis specialist capable of analyzing contract text from multiple perspectives.
@@ -216,12 +216,12 @@ Please return a JSON object with the following structure:
 If no relevant clause is found for a category, return {"found": false} for that category.
 `);
 
-    console.log(`Performing detailed analysis of chunk ${chunk.chunk_id} with GPT-4 for relevant categories`);
-    // Second pass - detailed analysis with GPT-4, but only for relevant categories
+    console.log(`Performing detailed analysis of chunk ${chunk.chunk_id} with GPT-4o-mini for relevant categories`);
+    // Second pass - detailed analysis with GPT-4o-mini, but only for relevant categories
     const userContent = `Please analyze this contract text and return a JSON response with analyses for the requested aspects:\n\n${chunk.text}`;
     
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       messages: [
         { role: "system", content: detailedPrompt },
         { role: "user", content: userContent }
@@ -327,4 +327,4 @@ export default async function handler(req: Request) {
       headers: { 'Content-Type': 'application/json' }
     });
   }
-} 
+}
